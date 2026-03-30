@@ -42,7 +42,8 @@ next-env.d.ts
 
 
 # --- 텐키 할배 라디오 AI 생성 결과물 (용량 폭발 방지) ---
-.radio_output/
+.radio_output/*
+!.radio_output/*.mjs
 audio/
 images/
 videos/
