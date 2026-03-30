@@ -305,7 +305,7 @@ Return ONLY valid JSON, no other text:
         scene_id: sceneId,
         type: sceneType,
         final_score: lastScore ?? 100,
-        status: attempt => attempt > 0 ? 'fixed' : 'pass',
+        status: fixedCount > 0 && lastScore !== null ? 'fixed' : 'pass',
       });
     }
 
@@ -334,6 +334,28 @@ Return ONLY valid JSON, no other text:
     if (mjMatches) {
       issues.push(`Midjourney 파라미터 발견 (${mjMatches.join(', ')}) — 자동 제거`);
       prompt = prompt.replace(MIDJOURNEY_PARAM_RE, '').replace(/\s{2,}/g, ' ').trim();
+      scene.visual_prompt_en = prompt;
+      fixed = true;
+    }
+
+    // ── 1b. 종횡비 교란 키워드 자동 제거 ─────────────────────────────────
+    // "square", "portrait format", "vertical" 등은 16:9 API 설정과 충돌
+    const aspectConfusionRE = /\b(square\s+format|portrait\s+format|portrait\s+ratio|vertical\s+format|1:1\s+ratio)\b/gi;
+    const aspectMatches = prompt.match(aspectConfusionRE);
+    if (aspectMatches) {
+      issues.push(`종횡비 교란 키워드 발견 (${aspectMatches.join(', ')}) — 자동 제거`);
+      prompt = prompt.replace(aspectConfusionRE, '').replace(/\s{2,}/g, ' ').trim();
+      scene.visual_prompt_en = prompt;
+      fixed = true;
+    }
+
+    // ── 1c. 실사 키워드 자동 제거 (아트 스타일 지시어 제외) ───────────────
+    // "realistic" 단독 사용은 실사 유발. "natural aging features"처럼 natural/age 뒤에 오는 건 허용.
+    const realisticRE = /\b(hyperrealistic|photorealistic(?!\s+excluded)|(?<!\w\s{0,20})realistic(?!\s+aging))\b/gi;
+    const realisticMatches = prompt.match(realisticRE);
+    if (realisticMatches) {
+      issues.push(`실사 키워드 발견 (${realisticMatches.join(', ')}) — 자동 제거`);
+      prompt = prompt.replace(realisticRE, '').replace(/\s{2,}/g, ' ').trim();
       scene.visual_prompt_en = prompt;
       fixed = true;
     }

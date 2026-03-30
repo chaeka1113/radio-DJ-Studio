@@ -81,10 +81,17 @@ Character Info:
 CRITICAL: The character seed must uniquely identify this person so they look IDENTICAL across all scenes.
 Include: exact age appearance, face structure, hair (color+style+length), body type, FIXED signature clothing item, personality showing in posture/expression.
 
+## ABSOLUTE RULES FOR CHARACTER SEED (violations cause image hallucinations):
+1. NEVER mention moles, beauty marks, freckles, or any skin marks — these cause scene-to-scene inconsistency
+2. NEVER use negative-form descriptions like "no moles", "NO glasses" in the seed — negatives belong ONLY in negative_prompt
+3. ONLY mention glasses if the character explicitly wears them in the story. If they do NOT wear glasses, do NOT mention glasses at all (not even "no glasses")
+4. Face description must use ABSOLUTE STATE language: e.g. "clean smooth skin with natural aging features only" — NOT "no moles, no marks"
+5. The seed will be prepended with a Visual Anchor: "(Showa retro anime, Studio Ghibli style hand-drawn illustration)," — do NOT include this in the seed itself
+
 Art Style for ALL prompts:
 - Showa retro anime illustration, Studio Ghibli warm color palette
 - Warm amber/dusty rose/faded navy tones, masterpiece, best quality, highly detailed, 8k, cinematic
-- Global negative: modern style, western features, photorealistic, 3D render, nsfw, watermark, blurry
+- Global negative: photorealistic, 3D render, realistic, real photo, hyperrealistic, modern style, cyberpunk, neon colors, glossy texture, plastic texture, abstract, moles, beauty marks, glasses, spectacles, nsfw, watermark, blurry, western features
 
 Output JSON only:
 {

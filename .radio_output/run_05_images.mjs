@@ -17,7 +17,7 @@ const imagesDir = path.join(__dirname, 'images');
 if (!fs.existsSync(imagesDir)) fs.mkdirSync(imagesDir, { recursive: true });
 
 // Imagen 4.0 REST API
-async function generateImageImagen3(prompt) {
+async function generateImageImagen3(prompt, negativePrompt) {
   const body = JSON.stringify({
     instances: [{ prompt }],
     parameters: {
@@ -25,6 +25,7 @@ async function generateImageImagen3(prompt) {
       aspectRatio: '16:9',
       safetyFilterLevel: 'BLOCK_ONLY_HIGH',
       personGeneration: 'ALLOW_ALL',
+      negativePrompt: negativePrompt || GLOBAL_NEGATIVE,
     }
   });
 
@@ -52,15 +53,17 @@ async function generateImageImagen3(prompt) {
   });
 }
 
-const STYLE_SUFFIX = ' Showa retro anime illustration, Studio Ghibli warm color palette, warm amber cinematic lighting, masterpiece, best quality, highly detailed, 8k, 16:9.';
+const STYLE_SUFFIX = ' Showa retro anime illustration, Studio Ghibli warm color palette, warm amber cinematic lighting, masterpiece, best quality, highly detailed, 8k.';
+
+const GLOBAL_NEGATIVE = 'photorealistic, 3D render, realistic, real photo, photograph, hyperrealistic, modern style, cyberpunk, neon colors, glossy texture, plastic texture, abstract, moles, beauty marks, glasses, spectacles, nsfw, blurry, watermark, western features, square format, portrait format';
 
 // 지수 백오프 재시도 (Imagen 4.0 only)
-async function generateWithBackoff(prompt, sceneId) {
+async function generateWithBackoff(prompt, negativePrompt, sceneId) {
   const BACKOFF_DELAYS = [30000, 60000, 120000];
   let lastErr;
   for (let attempt = 0; attempt <= BACKOFF_DELAYS.length; attempt++) {
     try {
-      return await generateImageImagen3(prompt);
+      return await generateImageImagen3(prompt, negativePrompt);
     } catch (err) {
       lastErr = err;
       const is429 = err.message.includes('429') || err.message.toLowerCase().includes('quota');
@@ -92,10 +95,11 @@ for (let i = 0; i < scenes.length; i++) {
   }
 
   const prompt = scene.visual_prompt_en + STYLE_SUFFIX;
+  const negPrompt = scene.negative_prompt || GLOBAL_NEGATIVE;
   process.stdout.write(`🖼️  [${i+1}/${scenes.length}] ${scene.scene_id} (${scene.type})... `);
 
   try {
-    const b64 = await generateWithBackoff(prompt, scene.scene_id);
+    const b64 = await generateWithBackoff(prompt, negPrompt, scene.scene_id);
     fs.writeFileSync(filePath, Buffer.from(b64, 'base64'));
     process.stdout.write(`✅\n`);
     results.push({ scene_id: scene.scene_id, status: 'success', file: filePath });

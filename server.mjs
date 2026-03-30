@@ -186,7 +186,9 @@ app.post('/api/generate-storyboard', async (req, res) => {
   const code03 = await runScript(sse, 'run_03_casting.mjs');
   if (code03 !== 0) return sse.done(code03);
   const code04 = await runScript(sse, 'run_04_storyboard.mjs');
-  sse.done(code04);
+  if (code04 !== 0) return sse.done(code04);
+  const codeQA = await runScript(sse, 'run_04_visual_QA.mjs');
+  sse.done(codeQA);
 });
 
 // 05 이미지 생성

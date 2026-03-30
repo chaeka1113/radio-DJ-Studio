@@ -37,7 +37,19 @@ const model = genAI.getGenerativeModel({
 });
 
 // テンキ爺 고정 시드 (TENKI_JII)
-const DJ_SEED = 'A battered retro tin robot DJ (Tenki-jii) at a vintage Showa-era radio desk, square boxy head with cracked paint and rust spots, single glowing mono-eye, bent antennae, faded red chest panel with analog dials, worn mechanical arms, warm amber vacuum tube glow, dusty studio with stacked vinyl records,';
+const DJ_SEED = '(Showa retro anime, Studio Ghibli style hand-drawn illustration), A battered retro tin robot DJ (Tenki-jii) at a vintage Showa-era radio desk, square boxy head with cracked paint and rust spots, single glowing mono-eye, bent antennae, faded red chest panel with analog dials, worn mechanical arms, warm amber vacuum tube glow, dusty studio with stacked vinyl records,';
+
+// 나이 앵커 생성기
+function getAgeAnchor(age) {
+  const n = parseInt(age) || 0;
+  if (n <= 29) return '(Young 20s smooth face, no wrinkles, youthful clear skin),';
+  if (n <= 39) return '(30s face, minimal fine lines, young-adult appearance),';
+  if (n <= 55) return '(Middle-aged face, visible laugh lines, mature look),';
+  if (n <= 69) return '(60s face, clear deep wrinkles, salt-and-pepper or gray hair),';
+  return '(Deeply wrinkled 70s+ face, heavy age lines, white or gray hair),';
+}
+
+const STYLE_ANCHOR = '(Showa retro anime, Studio Ghibli style hand-drawn illustration),';
 
 async function withRetry(fn, label) {
   const delays = [10000, 30000, 60000];
@@ -93,7 +105,8 @@ for (const ep of djScript.episodes) {
   // 영어 시각 제약 문자열 — visual_prompt_en 앞에 직접 삽입
   let englishVisualConstraint = '';
   if (epSheet) {
-    const glassesDesc = epSheet.appearance.glasses === 'yes' ? 'wearing glasses,' : 'NO glasses (glasses-free face),';
+    // 안경 미착용 시 언급 자체를 삭제 — 부정형("NO glasses")은 Imagen 혼란 유발
+    const glassesDesc = epSheet.appearance.glasses === 'yes' ? 'wearing glasses,' : '';
     const outfitDesc = epSheet.outfit.length > 0 ? epSheet.outfit.join(', ') + ',' : '';
     const hairDesc = epSheet.appearance.hair_style ? `${epSheet.appearance.hair_style} hair,` : '';
     englishVisualConstraint = `${glassesDesc} ${hairDesc} ${outfitDesc}`.replace(/\s+/g, ' ').trim();
@@ -182,15 +195,30 @@ Output JSON array only:
 
   if (scenes) {
     scenes.forEach(s => {
-      // FLASHBACK 후처리: 젊은 시절 modifier 강제 삽입
+      // ── Visual Anchor 1: Style Lock — 프롬프트 맨 앞에 작화 고정 앵커 삽입
+      if (!s.visual_prompt_en.startsWith('(Showa retro anime')) {
+        s.visual_prompt_en = STYLE_ANCHOR + ' ' + s.visual_prompt_en;
+      }
+
       if (s.type === 'FLASHBACK' && charSeed) {
-        const YOUNG_MOD = 'younger version of this character in their 20s-30s, youthful face without wrinkles, energetic posture, ';
-        // character seed 직후에 삽입 (쉼표 뒤)
+        // FLASHBACK: YOUNG_MOD + 나이 앵커 오버라이드 (항상 20s 앵커)
+        const YOUNG_MOD = 'younger version of this character in their 20s-30s, (Young 20s smooth face, no wrinkles, youthful clear skin), energetic posture, ';
         s.visual_prompt_en = s.visual_prompt_en.replace(
           charSeed.trim(),
           charSeed.trim() + ' ' + YOUNG_MOD
         );
+      } else if (charSeed) {
+        // ── Visual Anchor 2: Age Lock — 캐릭터 시드 직후 나이 앵커 삽입
+        const ageAnchor = getAgeAnchor(ep.character.age);
+        const seedTrimmed = charSeed.trim();
+        if (s.visual_prompt_en.includes(seedTrimmed) && !s.visual_prompt_en.includes('(Young 20s') && !s.visual_prompt_en.includes('(60s face') && !s.visual_prompt_en.includes('(30s face') && !s.visual_prompt_en.includes('(Middle-aged') && !s.visual_prompt_en.includes('(Deeply wrinkled')) {
+          s.visual_prompt_en = s.visual_prompt_en.replace(
+            seedTrimmed,
+            seedTrimmed + ' ' + ageAnchor
+          );
+        }
       }
+
       allScenes.push({
         scene_id: sc(),
         episode_id: ep.id,
