@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="ja" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>📻 テンキ爺 Radio DJ Studio</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config = { darkMode: 'class' }</script>
+<style>
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #1f2937; }
+  ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 3px; }
+  .log-line-error { color: #f87171; }
+  .log-line-log { color: #d1fae5; }
+  .fade-in { animation: fadeIn .3s ease; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+  textarea { resize: vertical; }
+</style>
+</head>
+<body class="bg-gray-900 text-gray-100 font-sans flex flex-col h-screen overflow-hidden">
+
+<!-- ===== HEADER ===== -->
+<header class="bg-gray-800 border-b border-gray-700 px-5 py-3 flex items-center gap-4 shrink-0">
+  <span class="text-2xl">📻</span>
+  <div>
+    <h1 class="text-base font-bold text-amber-400 leading-tight">テンキ爺 Radio DJ Studio</h1>
+    <p class="text-xs text-gray-500">ガラクタロボ Web Dashboard</p>
+  </div>
+  <div class="flex-1"></div>
+  <!-- Pipeline Status Dots -->
+  <div class="flex items-center gap-3 text-xs">
+    <span id="dot-01" class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-gray-600"></span>대본</span>
+    <span id="dot-02" class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-gray-600"></span>DJ멘트</span>
+    <span id="dot-04" class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-gray-600"></span>스토리보드</span>
+    <span id="dot-05" class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-gray-600"></span>이미지</span>
+    <span id="dot-07" class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-gray-600"></span>TTS</span>
+  </div>
+</header>
+
+<!-- ===== TOPIC INPUT BAR ===== -->
+<div class="bg-gray-800 border-b border-gray-700 px-5 py-3 flex gap-3 items-center shrink-0">
+  <input id="topic1" type="text" placeholder="テーマ1 (예: 健康)" class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-amber-500">
+  <input id="topic2" type="text" placeholder="テーマ2 (예: 財テク)" class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-amber-500">
+  <input id="topic3" type="text" placeholder="テーマ3 (예: ロマンス)" class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-amber-500">
+  <button onclick="runFullPipeline()" class="bg-amber-500 hover:bg-amber-400 text-black font-bold px-4 py-1.5 rounded text-sm whitespace-nowrap transition-colors">
+    🎙 全工程 生成
+  </button>
+</div>
+
+<!-- ===== PIPELINE STEP BUTTONS ===== -->
+<div class="bg-gray-850 border-b border-gray-700 px-5 py-2 flex gap-2 items-center shrink-0" style="background:#111827">
+  <span class="text-xs text-gray-500 mr-1">개별 실행:</span>
+  <button onclick="runStep('01')" class="step-btn px-3 py-1 rounded text-xs bg-gray-700 hover:bg-amber-600 transition-colors">📝 01 대본</button>
+  <label class="flex items-center gap-1.5 cursor-pointer select-none ml-1 mr-2">
+    <input type="checkbox" id="includeMz" class="accent-amber-400 w-3.5 h-3.5">
+    <span class="text-xs text-amber-300 whitespace-nowrap">🔥 MZ 사연 1개 섞기</span>
+  </label>
+  <label class="flex items-center gap-1.5 cursor-pointer select-none mr-2">
+    <input type="checkbox" id="includeQna" class="accent-amber-400 w-3.5 h-3.5">
+    <span class="text-xs text-amber-300 whitespace-nowrap">💬 짤막 Q&A 추가</span>
+  </label>
+  <button onclick="runStep('02')" class="step-btn px-3 py-1 rounded text-xs bg-gray-700 hover:bg-amber-600 transition-colors">🤖 02 DJ멘트</button>
+  <button onclick="runStep('04')" class="step-btn px-3 py-1 rounded text-xs bg-gray-700 hover:bg-amber-600 transition-colors">🎬 03+04 스토리보드</button>
+  <button onclick="runStep('05', false)" class="step-btn px-3 py-1 rounded text-xs bg-gray-700 hover:bg-amber-600 transition-colors">🖼 05 이미지 (없는것만)</button>
+  <button onclick="runStep('05', true)" class="step-btn px-3 py-1 rounded text-xs bg-gray-700 hover:bg-red-700 transition-colors">🗑🖼 05 이미지 (전체 강제재생성)</button>
+  <button onclick="runStep('07')" class="step-btn px-3 py-1 rounded text-xs bg-gray-700 hover:bg-amber-600 transition-colors">🎧 07 TTS스크립트</button>
+  <div class="flex-1"></div>
+  <button onclick="refreshAll()" class="px-3 py-1 rounded text-xs bg-gray-700 hover:bg-gray-600 transition-colors">🔄 데이터 새로고침</button>
+</div>
+
+<!-- ===== MAIN CONTENT ===== -->
+<div class="flex flex-1 overflow-hidden">
+
+  <!-- LEFT: Text Editor Panel -->
+  <div class="w-2/5 flex flex-col border-r border-gray-700 overflow-hidden">
+
+    <!-- Editor Tabs -->
+    <div class="flex border-b border-gray-700 bg-gray-800 shrink-0">
+      <button onclick="setTab('scripts')" id="tab-scripts" class="tab-btn px-4 py-2 text-xs font-medium border-b-2 border-amber-500 text-amber-400">📄 대본 (01)</button>
+      <button onclick="setTab('dj')" id="tab-dj" class="tab-btn px-4 py-2 text-xs font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">🤖 DJ멘트 (02)</button>
+      <button onclick="setTab('audio')" id="tab-audio" class="tab-btn px-4 py-2 text-xs font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">🎧 TTS스크립트 (07)</button>
+      <div class="flex-1"></div>
+      <button onclick="saveText()" class="px-3 py-1 m-1 text-xs bg-green-700 hover:bg-green-600 rounded transition-colors">💾 저장</button>
+    </div>
+
+    <!-- Editor Textarea -->
+    <div class="flex-1 flex flex-col overflow-hidden p-3 gap-2">
+      <textarea id="editor"
+        class="flex-1 bg-gray-800 border border-gray-700 rounded p-3 text-xs font-mono text-gray-200 focus:outline-none focus:border-amber-500 leading-relaxed"
+        placeholder="파이프라인을 실행하면 여기에 텍스트가 표시됩니다..."
+        spellcheck="false"></textarea>
+
+      <!-- Translation buttons + panel -->
+      <div>
+        <button onclick="translateText()" class="w-full py-1.5 text-xs bg-blue-700 hover:bg-blue-600 rounded transition-colors font-medium">
+          🇰🇷 한국어로 번역 보기
+        </button>
+        <div id="translate-panel" class="hidden mt-2 fade-in">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs text-blue-400 font-medium">🇰🇷 한국어 번역 (읽기 전용)</span>
+            <button onclick="closeTranslation()" class="text-xs text-gray-500 hover:text-gray-300">✕ 닫기</button>
+          </div>
+          <div id="translate-result"
+            class="bg-gray-700 border border-blue-800 rounded p-3 text-xs text-blue-100 leading-relaxed max-h-48 overflow-y-auto font-mono whitespace-pre-wrap"
+          >번역 중 ⏳...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Image Gallery + Log -->
+  <div class="flex-1 flex flex-col overflow-hidden">
+
+    <!-- Log Panel (collapsible) -->
+    <div id="log-panel" class="bg-gray-950 border-b border-gray-700 shrink-0" style="height:120px; display:none;">
+      <div class="flex items-center justify-between px-3 py-1 border-b border-gray-800">
+        <span class="text-xs text-gray-400">📟 실행 로그</span>
+        <button onclick="toggleLog()" class="text-xs text-gray-500 hover:text-gray-300">✕ 닫기</button>
+      </div>
+      <div id="log-content" class="overflow-y-auto font-mono text-xs p-2" style="height:88px;"></div>
+    </div>
+
+    <!-- Gallery Header -->
+    <div class="flex items-center gap-3 px-4 py-2 border-b border-gray-700 bg-gray-800 shrink-0">
+      <span class="text-sm font-semibold text-gray-300">🖼 이미지 갤러리</span>
+      <span id="gallery-count" class="text-xs text-gray-500"></span>
+      <div class="flex-1"></div>
+      <button onclick="loadGallery()" class="text-xs text-gray-500 hover:text-gray-300">🔄 새로고침</button>
+    </div>
+
+    <!-- Gallery Grid -->
+    <div id="gallery" class="flex-1 overflow-y-auto p-3">
+      <div class="text-center text-gray-600 text-sm mt-20">
+        <div class="text-4xl mb-3">🎞</div>
+        <p>이미지 생성 후 여기에 표시됩니다</p>
+        <p class="text-xs mt-1">05 이미지 스텝을 실행하세요</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── State ──────────────────────────────────────────────────────────────────
+let currentTab = 'scripts';
+let currentScriptsData = null;
+let currentDjData = null;
+let currentAudioText = '';
+let storyboardScenes = [];
+
+// ─── Tab Management ──────────────────────────────────────────────────────────
+function setTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.remove('border-amber-500', 'text-amber-400');
+    b.classList.add('border-transparent', 'text-gray-400');
+  });
+  const active = document.getElementById(`tab-${tab}`);
+  active.classList.add('border-amber-500', 'text-amber-400');
+  active.classList.remove('border-transparent', 'text-gray-400');
+  closeTranslation();
+
+  if (tab === 'scripts') renderScriptsToEditor();
+  else if (tab === 'dj') renderDjToEditor();
+  else if (tab === 'audio') renderAudioToEditor();
+}
+
+// ─── Data Rendering ──────────────────────────────────────────────────────────
+function renderScriptsToEditor() {
+  if (!currentScriptsData) {
+    document.getElementById('editor').value = '(데이터 없음 — 01 대본 스텝을 먼저 실행하세요)';
+    return;
+  }
+  const lines = [];
+  for (const ep of currentScriptsData.episodes || []) {
+    lines.push(`━━━ EP${ep.id} ／ ${ep.theme} ／ ${ep.title} ━━━`);
+    lines.push(`感情トーン: ${ep.emotion_tone}`);
+    lines.push(`主人公: ${ep.character?.name} · ${ep.character?.age} · ${ep.character?.setting}`);
+    lines.push('');
+    lines.push(ep.script || '');
+    lines.push('');
+    lines.push('');
+  }
+  document.getElementById('editor').value = lines.join('\n');
+}
+
+function renderDjToEditor() {
+  if (!currentDjData) {
+    document.getElementById('editor').value = '(데이터 없음 — 02 DJ멘트 스텝을 먼저 실행하세요)';
+    return;
+  }
+  const lines = [];
+  if (currentDjData.show_opening) {
+    lines.push('━━━ SHOW OPENING ━━━');
+    lines.push('');
+    lines.push(currentDjData.show_opening);
+    lines.push('');
+    lines.push('');
+  }
+  for (const ep of currentDjData.episodes || []) {
+    lines.push(`━━━ EP${ep.id} ／ ${ep.theme} ／ ${ep.title} ━━━`);
+    lines.push('');
+    lines.push('【DJ Reaction】');
+    lines.push(ep.dj_reaction || '');
+    if (ep.dj_transition) {
+      lines.push('');
+      lines.push('【Transition】');
+      lines.push(ep.dj_transition);
+    }
+    lines.push('');
+    lines.push('');
+  }
+  if (currentDjData.show_closing) {
+    lines.push('━━━ SHOW CLOSING ━━━');
+    lines.push('');
+    lines.push(currentDjData.show_closing);
+    lines.push('');
+  }
+  document.getElementById('editor').value = lines.join('\n');
+}
+
+function renderAudioToEditor() {
+  document.getElementById('editor').value = currentAudioText || '(데이터 없음 — 07 TTS스크립트 스텝을 먼저 실행하세요)';
+}
+
+// ─── Save Text ───────────────────────────────────────────────────────────────
+async function saveText() {
+  const text = document.getElementById('editor').value;
+
+  if (currentTab === 'audio') {
+    await fetch('/api/data/audio', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    currentAudioText = text;
+    showToast('💾 TTS 스크립트 저장 완료');
+    return;
+  }
+
+  // For scripts/dj, show info that raw JSON editing isn't supported in view mode
+  showToast('ℹ️ TTS스크립트 탭에서만 직접 저장 가능. JSON은 파일을 직접 수정하세요.', 3000);
+}
+
+// ─── Translation ─────────────────────────────────────────────────────────────
+async function translateText() {
+  const text = document.getElementById('editor').value;
+  if (!text || text.startsWith('(데이터 없음')) return;
+
+  const panel = document.getElementById('translate-panel');
+  const result = document.getElementById('translate-result');
+  panel.classList.remove('hidden');
+  result.textContent = '번역 중 ⏳...';
+
+  try {
+    const resp = await fetch('/api/translate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    result.textContent = data.translated;
+  } catch (err) {
+    result.textContent = `❌ 번역 실패: ${err.message}`;
+  }
+}
+
+function closeTranslation() {
+  document.getElementById('translate-panel').classList.add('hidden');
+}
+
+// ─── Pipeline Execution ───────────────────────────────────────────────────────
+async function runFullPipeline() {
+  const t1 = document.getElementById('topic1').value.trim();
+  const t2 = document.getElementById('topic2').value.trim();
+  const t3 = document.getElementById('topic3').value.trim();
+  if (!t1 || !t2 || !t3) { showToast('❌ 주제 3개를 모두 입력하세요', 2000); return; }
+
+  showLog();
+  appendLog('=== 全工程 パイプライン 開始 ===', 'log');
+
+  // 01 대본
+  const _includeMz = document.getElementById('includeMz').checked;
+  const _includeQna = document.getElementById('includeQna').checked;
+  if (_includeMz) appendLog('🔥 MZ 모드 체크됨 — --mz 플래그 전송 중', 'log');
+  let r = await streamStep('/api/generate-scripts', { topics: [t1, t2, t3], includeMz: _includeMz, includeQna: _includeQna });
+  if (!r.success) { setDot('01', 'red'); appendLog('❌ 01 대본 실패 — 파이프라인 중단', 'error'); showToast('❌ 01 대본 생성 실패'); return; }
+  await loadScripts(); setDot('01', 'green'); setTab('scripts');
+
+  // 02 DJ멘트
+  r = await streamStep('/api/generate-dj', { includeQna: _includeQna });
+  if (!r.success) { setDot('02', 'red'); appendLog('❌ 02 DJ멘트 실패 — 파이프라인 중단', 'error'); showToast('❌ 02 DJ멘트 생성 실패'); return; }
+  await loadDj(); setDot('02', 'green'); setTab('dj');
+
+  // 03+04 스토리보드
+  r = await streamStep('/api/generate-storyboard', {});
+  if (!r.success) { setDot('04', 'red'); appendLog('❌ 03+04 스토리보드 실패 — 파이프라인 중단', 'error'); showToast('❌ 스토리보드 생성 실패'); return; }
+  await loadStoryboard(); setDot('04', 'green');
+
+  // 05 이미지 — 생성 중 4초마다 갤러리 폴링
+  setTab('gallery');
+  const imgPoll = setInterval(() => loadGallery(), 4000);
+  r = await streamStep('/api/generate-images', {});
+  clearInterval(imgPoll);
+  if (!r.success) { setDot('05', 'red'); appendLog('❌ 05 이미지 실패', 'error'); showToast('❌ 이미지 생성 실패'); return; }
+  await loadGallery(); setDot('05', 'green');
+
+  // 07 TTS
+  r = await streamStep('/api/generate-audio-script', {});
+  if (!r.success) { setDot('07', 'red'); appendLog('❌ 07 TTS스크립트 실패', 'error'); showToast('❌ TTS 스크립트 생성 실패'); return; }
+  await loadAudio(); setDot('07', 'green'); setTab('audio');
+
+  appendLog('=== ✅ 全工程 完了 ===', 'log');
+  showToast('🎉 전체 파이프라인 완료!');
+}
+
+async function runStep(step, force = false) {
+  showLog();
+  const endpoints = {
+    '01': ['/api/generate-scripts', () => {
+      const t1 = document.getElementById('topic1').value.trim();
+      const t2 = document.getElementById('topic2').value.trim();
+      const t3 = document.getElementById('topic3').value.trim();
+      if (!t1 || !t2 || !t3) { showToast('❌ 주제 3개를 입력하세요'); return null; }
+      const mz = document.getElementById('includeMz').checked;
+      const qna = document.getElementById('includeQna').checked;
+      if (mz) appendLog('🔥 MZ 모드 체크됨 — --mz 플래그 전송 중', 'log');
+      return { topics: [t1, t2, t3], includeMz: mz, includeQna: qna };
+    }],
+    '02': ['/api/generate-dj', () => ({ includeQna: document.getElementById('includeQna').checked })],
+    '04': ['/api/generate-storyboard', () => ({})],
+    '05': ['/api/generate-images', () => ({ force })],
+    '07': ['/api/generate-audio-script', () => ({})],
+  };
+
+  const [url, getBody] = endpoints[step] || [];
+  if (!url) return;
+  const body = getBody();
+  if (body === null) return;
+
+  await streamStep(url, body);
+
+  if (step === '01') { await loadScripts(); setDot('01', 'green'); setTab('scripts'); }
+  if (step === '02') { await loadDj(); setDot('02', 'green'); setTab('dj'); }
+  if (step === '04') { await loadStoryboard(); setDot('04', 'green'); }
+  if (step === '05') { await loadGallery(); setDot('05', 'green'); }
+  if (step === '07') { await loadAudio(); setDot('07', 'green'); setTab('audio'); }
+}
+
+function streamStep(url, body) {
+  return new Promise((resolve) => {
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(resp => {
+      if (!resp.body) { resolve({ success: false }); return; }
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+
+      function pump() {
+        reader.read().then(({ done, value }) => {
+          if (done) { resolve({ success: true }); return; }
+          buf += decoder.decode(value, { stream: true });
+          const parts = buf.split('\n\n');
+          buf = parts.pop();
+          for (const part of parts) {
+            if (!part.startsWith('data: ')) continue;
+            try {
+              const evt = JSON.parse(part.slice(6));
+              if (evt.type === 'log') appendLog(evt.message, 'log');
+              else if (evt.type === 'error') appendLog(evt.message, 'error');
+              else if (evt.type === 'done') { resolve({ success: evt.code === 0 }); return; }
+            } catch {}
+          }
+          pump();
+        });
+      }
+      pump();
+    }).catch(err => { appendLog(`❌ ${err.message}`, 'error'); resolve({ success: false }); });
+  });
+}
+
+// ─── Data Loading ─────────────────────────────────────────────────────────────
+async function loadScripts() {
+  try {
+    const resp = await fetch(`/api/data/scripts?t=${Date.now()}`);
+    if (resp.ok) {
+      currentScriptsData = await resp.json();
+      if (currentTab === 'scripts') renderScriptsToEditor();
+      setDot('01', 'green');
+    }
+  } catch {}
+}
+
+async function loadDj() {
+  try {
+    const resp = await fetch(`/api/data/dj?t=${Date.now()}`);
+    if (resp.ok) {
+      currentDjData = await resp.json();
+      if (currentTab === 'dj') renderDjToEditor();
+      setDot('02', 'green');
+    }
+  } catch {}
+}
+
+async function loadAudio() {
+  try {
+    const resp = await fetch(`/api/data/audio?t=${Date.now()}`);
+    if (resp.ok) {
+      currentAudioText = await resp.text();
+      if (currentTab === 'audio') renderAudioToEditor();
+      setDot('07', 'green');
+    }
+  } catch {}
+}
+
+async function loadStoryboard() {
+  try {
+    const resp = await fetch(`/api/data/storyboard?t=${Date.now()}`);
+    if (resp.ok) {
+      const data = await resp.json();
+      storyboardScenes = data.scenes
+        ?? data.episodes?.flatMap(ep => (ep.scenes || []).map(s => ({ ...s, episode_id: ep.episode_id ?? ep.id })))
+        ?? [];
+      setDot('04', 'green');
+    }
+  } catch {}
+}
+
+async function loadGallery() {
+  try {
+    await loadStoryboard();
+    const resp = await fetch(`/api/data/images?t=${Date.now()}`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    renderGallery(data.results || []);
+    setDot('05', 'green');
+  } catch {}
+}
+
+function renderGallery(results) {
+  const gallery = document.getElementById('gallery');
+  if (!results.length) {
+    gallery.innerHTML = '<div class="text-center text-gray-600 text-sm mt-20"><div class="text-4xl mb-3">🎞</div><p>이미지 없음</p></div>';
+    return;
+  }
+
+  const sceneMap = {};
+  storyboardScenes.forEach(s => { sceneMap[s.scene_id] = s; });
+
+  const successCount = results.filter(r => r.status === 'success' || r.status === 'skipped').length;
+  document.getElementById('gallery-count').textContent = `${successCount} / ${results.length} 씬`;
+
+  gallery.innerHTML = `<div class="grid grid-cols-2 xl:grid-cols-3 gap-3">
+    ${results.map(item => {
+      const scene = sceneMap[item.scene_id] || {};
+      const isOk = item.status === 'success' || item.status === 'skipped';
+      const imgUrl = isOk ? `/output/images/${item.scene_id}.png` : '';
+      const dialogue = scene.japanese_dialogue || scene.visual_prompt_en?.slice(0, 80) || '';
+      return `
+      <div class="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden hover:border-amber-500 transition-colors" id="card-${item.scene_id}">
+        <div class="relative" style="aspect-ratio:16/9; background:#111;">
+          ${isOk
+            ? `<img src="${imgUrl}" alt="${item.scene_id}" class="w-full h-full object-cover" loading="lazy" onerror="this.style.display='none'">`
+            : `<div class="flex items-center justify-center h-full text-red-500 text-xs">❌ 실패</div>`
+          }
+          <div class="absolute top-1 left-1">
+            <span class="text-xs px-1.5 py-0.5 rounded font-mono font-bold ${scene.type === 'DJ_SHOT' ? 'bg-amber-600' : 'bg-blue-700'}">${item.scene_id}</span>
+          </div>
+        </div>
+        <div class="p-2">
+          <div class="text-xs text-gray-500 mb-1 truncate">${scene.speaker || scene.type || ''}</div>
+          <div class="text-xs text-gray-400 line-clamp-2 mb-2" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${dialogue}</div>
+          <button onclick="regenerateImage('${item.scene_id}')"
+            class="w-full py-1 text-xs bg-gray-700 hover:bg-amber-600 rounded transition-colors">
+            🔄 재생성
+          </button>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+async function regenerateImage(scene_id) {
+  const card = document.getElementById(`card-${scene_id}`);
+  if (card) {
+    const btn = card.querySelector('button');
+    btn.textContent = '⏳ 생성 중...';
+    btn.disabled = true;
+    // Dim the image
+    const img = card.querySelector('img');
+    if (img) img.style.opacity = '0.4';
+  }
+
+  try {
+    const resp = await fetch('/api/regenerate-image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scene_id }),
+    });
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+
+    // Update image in card
+    const img = card?.querySelector('img');
+    if (img) {
+      img.src = data.url;
+      img.style.opacity = '1';
+    }
+    const btn = card?.querySelector('button');
+    if (btn) { btn.textContent = '🔄 재생성'; btn.disabled = false; }
+    showToast(`✅ ${scene_id} 재생성 완료`);
+  } catch (err) {
+    showToast(`❌ ${scene_id} 실패: ${err.message}`, 4000);
+    const btn = card?.querySelector('button');
+    if (btn) { btn.textContent = '🔄 재생성'; btn.disabled = false; }
+    const img = card?.querySelector('img');
+    if (img) img.style.opacity = '1';
+  }
+}
+
+// ─── Log Panel ────────────────────────────────────────────────────────────────
+function showLog() {
+  document.getElementById('log-panel').style.display = 'block';
+}
+function toggleLog() {
+  const p = document.getElementById('log-panel');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+}
+function appendLog(msg, type = 'log') {
+  const content = document.getElementById('log-content');
+  const line = document.createElement('div');
+  line.className = type === 'error' ? 'log-line-error' : 'log-line-log';
+  line.textContent = msg;
+  content.appendChild(line);
+  content.scrollTop = content.scrollHeight;
+}
+
+// ─── Status Dots ─────────────────────────────────────────────────────────────
+function setDot(step, color) {
+  const el = document.getElementById(`dot-${step}`);
+  if (!el) return;
+  const dot = el.querySelector('span');
+  dot.className = `w-2 h-2 rounded-full bg-${color}-500`;
+}
+
+// ─── Toast ────────────────────────────────────────────────────────────────────
+function showToast(msg, duration = 2000) {
+  let toast = document.getElementById('toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'toast';
+    toast.className = 'fixed bottom-5 right-5 bg-gray-700 text-white text-sm px-4 py-2 rounded shadow-lg z-50 transition-opacity';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.style.opacity = '1';
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => { toast.style.opacity = '0'; }, duration);
+}
+
+// ─── Refresh All ─────────────────────────────────────────────────────────────
+async function refreshAll() {
+  await Promise.all([loadScripts(), loadDj(), loadAudio(), loadGallery()]);
+  setTab(currentTab);
+  showToast('🔄 데이터 새로고침 완료');
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+(async () => {
+  await refreshAll();
+  setTab('scripts');
+})();
+</script>
+</body>
+</html>

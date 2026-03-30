@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -h \"^description:\" /c/radio-dj-studio/.claude/agents/*.md)",
+      "Bash(node:*)",
+      "Bash(netstat -ano)",
+      "Bash(curl -s http://localhost:3000/api/data/scripts)"
+    ],
+    "defaultMode": "bypassPermissions"
+  }
+}
