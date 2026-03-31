@@ -14,17 +14,19 @@ type: reference
 
 ## 항목 1 — 캐릭터 일관성 및 시니어 네거티브 제약 [배점 40점] ⚠️ 가장 중요
 
-### 1-A. AI Slop 방지 키워드 [20점]
-주인공 묘사에 아래 AI Slop(인공적 과잉 미화) 방지 키워드가 포함되어야 한다.
+### 1-A. 긍정 프롬프트 Visual Anchor 규칙 [20점] ⚠️ ABSOLUTE PROHIBITION
 
-| 필수 방지 키워드 예시 | 목적 |
+**visual_prompt_en (Positive Prompt) 안에는 아래 금지 명사가 1글자도 들어가선 안 된다.**
+부정형("no moles", "no glasses")으로 써도 AI는 해당 오브젝트를 시각화하므로 청개구리처럼 그려버린다.
+
+| 절대 금지 명사 (positive_prompt 내 사용 금지) | 올바른 대체 표현 |
 |---|---|
-| `no moles`, `no beauty marks` | 얼굴 점 과잉 생성 방지 |
-| `clear skin (age-appropriate wrinkles)` | 과도한 보정 방지 |
-| `no extra fingers`, `five fingers` | 손가락 오류 방지 |
-| `natural aging features` | 시니어 외모 왜곡 방지 |
+| `mole`, `beauty mark`, `spot` (점) | `clean smooth face, flawless complexion` |
+| `glasses`, `spectacles`, `eyewear` (안경) | `bare face` — 눈은 색상·형태로 직접 묘사 |
+| `wrinkles` (젊은 층 캐릭터의 경우) | `smooth youthful skin, age-appropriate features` |
 
-누락 시: 방지 키워드 1개 누락당 -5점 (최대 -20점)
+**만점 조건:** visual_prompt_en에 위 금지 명사가 전혀 없으며, 얼굴 피부는 반드시 `clean, perfectly clear skin, flawless complexion` (로봇인 テンキ爺의 경우 `seamless clean metal surface`)로만 묘사됨.
+**위반 시:** 금지 명사 1개 발견당 -10점 (최대 -20점). Auto-fix: 금지 명사 전체 제거 후 올바른 대체 표현으로 교체.
 
 ### 1-B. 금지 스타일 네거티브 묘사 [20점] ⚠️ CRITICAL
 시니어 타겟 방송에 이질적인 스타일이 **프롬프트에 등장하거나, negative_prompt에서 명시적으로 제외되지 않으면** 즉시 감점.

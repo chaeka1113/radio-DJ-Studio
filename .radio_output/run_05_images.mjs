@@ -17,7 +17,7 @@ const imagesDir = path.join(__dirname, 'images');
 if (!fs.existsSync(imagesDir)) fs.mkdirSync(imagesDir, { recursive: true });
 
 // Imagen 4.0 REST API
-async function generateImageImagen3(prompt, negativePrompt) {
+async function generateImageImagen3(prompt) {
   const body = JSON.stringify({
     instances: [{ prompt }],
     parameters: {
@@ -25,7 +25,6 @@ async function generateImageImagen3(prompt, negativePrompt) {
       aspectRatio: '16:9',
       safetyFilterLevel: 'BLOCK_ONLY_HIGH',
       personGeneration: 'ALLOW_ALL',
-      negativePrompt: negativePrompt || GLOBAL_NEGATIVE,
     }
   });
 
@@ -57,20 +56,24 @@ const STYLE_SUFFIX = ' Showa retro anime illustration, Studio Ghibli warm color 
 
 const GLOBAL_NEGATIVE = 'photorealistic, 3D render, realistic, real photo, photograph, hyperrealistic, modern style, cyberpunk, neon colors, glossy texture, plastic texture, abstract, moles, beauty marks, glasses, spectacles, nsfw, blurry, watermark, western features, square format, portrait format';
 
-// 지수 백오프 재시도 (Imagen 4.0 only)
+// ── [PATCH] 지수 백오프: 1분 → 2분 → 4분 ────────────────────────────────────
 async function generateWithBackoff(prompt, negativePrompt, sceneId) {
-  const BACKOFF_DELAYS = [30000, 60000, 120000];
+  const BACKOFF_DELAYS = [60000, 120000, 240000];
   let lastErr;
   for (let attempt = 0; attempt <= BACKOFF_DELAYS.length; attempt++) {
     try {
-      return await generateImageImagen3(prompt, negativePrompt);
+      return await generateImageImagen3(prompt);
     } catch (err) {
       lastErr = err;
       const is429 = err.message.includes('429') || err.message.toLowerCase().includes('quota');
       if (attempt < BACKOFF_DELAYS.length) {
-        const waitMs = is429 ? BACKOFF_DELAYS[attempt] : 10000;
-        console.warn(`   ⚠️ [${sceneId}] 시도 ${attempt + 1} 실패 (${err.message.slice(0, 60)})`);
-        console.log(`   ⏳ ${waitMs / 1000}초 대기 후 Imagen 4.0 재시도...`);
+        const waitMs = BACKOFF_DELAYS[attempt];
+        if (is429) {
+          console.warn(`\n   🚨 [${sceneId}] Quota 제한 도달: ${waitMs / 1000}초 대기 중... (시도 ${attempt + 1}/${BACKOFF_DELAYS.length})`);
+        } else {
+          console.warn(`   ⚠️ [${sceneId}] 시도 ${attempt + 1} 실패 (${err.message.slice(0, 60)})`);
+          console.log(`   ⏳ ${waitMs / 1000}초 대기 후 Imagen 4.0 재시도...`);
+        }
         await new Promise(r => setTimeout(r, waitMs));
       }
     }
@@ -82,12 +85,13 @@ const results = [];
 let success = 0, fail = 0;
 
 console.log(`🖼️ 총 ${scenes.length}개 씬 이미지 생성 시작 (Imagen 4.0 전용)`);
-console.log(`   예상 소요: 약 ${Math.ceil(scenes.length * 7 / 60)}분\n`);
+console.log(`   예상 소요: 약 ${Math.ceil(scenes.length * 15 / 60)}분\n`);
 
 for (let i = 0; i < scenes.length; i++) {
   const scene = scenes[i];
   const filePath = path.join(imagesDir, `${scene.scene_id}.png`);
 
+  // ✅ 멱등성: 이미 생성된 파일 스킵
   if (fs.existsSync(filePath)) {
     process.stdout.write(`⏭️  [${i+1}/${scenes.length}] ${scene.scene_id} 스킵\n`);
     results.push({ scene_id: scene.scene_id, status: 'skipped', file: filePath });
@@ -111,7 +115,8 @@ for (let i = 0; i < scenes.length; i++) {
     fail++;
   }
 
-  if (i < scenes.length - 1) await new Promise(r => setTimeout(r, 7000));
+  // ── [PATCH] 씬 간 대기: 7s → 15s (분당 최대 4회 제한) ──────────────────────
+  if (i < scenes.length - 1) await new Promise(r => setTimeout(r, 15000));
 }
 
 fs.writeFileSync(

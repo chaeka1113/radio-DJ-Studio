@@ -25,9 +25,12 @@
 
 ### 원천 차단 필수 사항
 
-1. **AI Slop 방지 키워드 반드시 포함**
-   - `no moles`, `no beauty marks`, `clear skin (age-appropriate wrinkles)`, `no extra fingers`, `natural aging features`
-   - 누락 시 항목 1에서 최대 -20점
+1. **긍정 프롬프트 Visual Anchor — 금지 명사 원천 차단**
+   - `visual_prompt_en`(positive prompt)에 `mole`, `beauty mark`, `glasses`, `spectacles`, `eyewear`, `wrinkles`(젊은 층) 명사를 **절대 사용 금지**
+   - 부정형(`no moles`, `no glasses`)도 포함 금지 — AI가 청개구리처럼 해당 사물을 시각화함
+   - 대신 절대적 상태로 묘사: `clean, perfectly clear skin, flawless complexion` (로봇인 テンキ爺의 경우 `seamless clean metal surface`), 눈은 색상·형태로 직접 묘사
+   - `no extra fingers` → `five fingers, each clearly separated` 형태로 긍정 묘사
+   - 위반 시 항목 1에서 최대 -20점
 
 2. **금지 스타일 negative_prompt 명시**
    - `cyberpunk`, `neon colors`, `glossy texture`, `plastic texture`, `abstract`, `Hyper-modern Transformer style`

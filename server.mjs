@@ -224,10 +224,12 @@ app.post('/api/regenerate-image', async (req, res) => {
   if (!scene) return res.status(404).json({ error: `씬 ${scene_id} 없음` });
 
   const STYLE = ' Showa retro anime illustration, Studio Ghibli warm color palette, warm amber cinematic lighting, masterpiece, best quality, highly detailed, 8k, 16:9.';
+  const FALLBACK_NEGATIVE = 'photorealistic, 3d render, realistic, photography, highly detailed skin, cyberpunk, transformer, modern style, neon colors, glossy texture, plastic texture, abstract, moles, beauty marks, glasses, spectacles, nsfw, blurry, watermark, western features';
   const prompt = scene.visual_prompt_en + STYLE;
+  const negativePrompt = scene.negative_prompt || FALLBACK_NEGATIVE;
   const body = JSON.stringify({
     instances: [{ prompt }],
-    parameters: { sampleCount: 1, aspectRatio: '16:9', safetyFilterLevel: 'BLOCK_ONLY_HIGH', personGeneration: 'ALLOW_ALL' },
+    parameters: { sampleCount: 1, aspectRatio: '16:9', safetyFilterLevel: 'BLOCK_ONLY_HIGH', personGeneration: 'ALLOW_ALL', negativePrompt },
   });
 
   try {

@@ -64,19 +64,25 @@ Character Info:
 CRITICAL: The character seed must uniquely identify this person so they look IDENTICAL across all scenes.
 Include: exact age appearance, face structure, hair (color+style+length), body type, FIXED signature clothing item, personality showing in posture/expression.
 
+⚠️ VISUAL ANCHOR LAW — ABSOLUTE PROHIBITION IN POSITIVE PROMPTS:
+- NEVER write: mole, beauty mark, spot, glasses, spectacles, eyewear, wrinkles (for young characters)
+- Writing "no moles" or "no glasses" is ALSO FORBIDDEN — it makes AI hallucinate those objects
+- Instead, describe the ABSOLUTE STATE: "clean, perfectly clear skin, flawless complexion" — for robot テンキ爺: "seamless clean metal surface". Describe eyes by color/shape directly
+- Forbidden objects belong ONLY in negative_prompt, never in character_seed or positive prompts
+
 Output JSON only:
 {
   "episode_id": ${ep.id},
   "character_name": "${char.name}",
-  "character_seed": "THE FIXED SEED — minimum 50 words describing ONLY the character appearance, must start with gender+age. This exact text will be prepended to EVERY scene prompt for this episode.",
+  "character_seed": "THE FIXED SEED — minimum 50 words describing ONLY the character appearance, must start with gender+age. Describe face as clean, perfectly smooth seamless face. Describe eyes by color and shape directly. NO forbidden nouns (mole/glasses/wrinkles). This exact text will be prepended to EVERY scene prompt for this episode.",
   "portrait_prompt": {
     "positive": "[character_seed] + portrait composition details, 1:1 aspect ratio, warm indoor lighting",
-    "negative": "young, western features, photorealistic, 3D render, nsfw, blurry, watermark",
+    "negative": "young, western features, photorealistic, 3D render, nsfw, blurry, watermark, moles, beauty marks, glasses, spectacles",
     "aspect_ratio": "1:1"
   },
   "scene_prompt_base": {
     "positive": "[character_seed] + sitting in their typical environment, 16:9 aspect ratio, cinematic",
-    "negative": "young, western features, photorealistic, 3D render, nsfw, blurry, watermark",
+    "negative": "young, western features, photorealistic, 3D render, nsfw, blurry, watermark, moles, beauty marks, glasses, spectacles",
     "aspect_ratio": "16:9"
   },
   "usage_instruction": "Prepend character_seed to the beginning of EVERY scene visual_prompt_en for episode ${ep.id}"
