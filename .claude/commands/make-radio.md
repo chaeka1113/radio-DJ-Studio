@@ -1,19 +1,22 @@
 ---
 name: make-radio
-description: "[Trigger] 사용자가 /make-radio [주제1] [주제2] [주제3]을 실행할 때. [Action] radio_rules.md 전역 규칙을 적용해 대본(01)→DJ멘트(02)→캐릭터프롬프트(03)→스토리보드(04)→이미지페이로드(05)→오디오스크립트(07) 7단계 파이프라인을 순서대로 실행한다. 각 단계의 출력 파일 존재 확인 후 완료 보고."
+description: "[Trigger] 사용자가 /make-radio (또는 /make-radio [주제1] [주제2] [주제3])을 실행할 때. [Action] 주제 미입력 시 Yahoo Japan+NHK RSS로 트렌드를 자동 수집한다. radio_rules.md 전역 규칙을 적용해 트렌드수집(00, 자동모드)→대본(01)→DJ멘트(02)→캐릭터프롬프트(03)→스토리보드(04)→이미지페이로드(05)→오디오스크립트(07) 파이프라인을 순서대로 실행한다. 각 단계의 출력 파일 존재 확인 후 완료 보고."
 ---
 
 # /make-radio
 
 ガラクタロボDJラジオ YouTube 롱폼 영상 자동화 파이프라인을 실행한다.
+주제를 생략하면 Yahoo Japan + NHK RSS 트렌드를 자동 수집한다.
 
 ## 사용법
 ```
-/make-radio [주제1] [주제2] [주제3]
+/make-radio                        ← 트렌드 자동 수집 (주제 생략)
+/make-radio [주제1] [주제2] [주제3] ← 주제 직접 입력
 ```
 
 ## 예시
 ```
+/make-radio
 /make-radio 失恋 定年退職 故郷への帰省
 ```
 
@@ -27,11 +30,21 @@ description: "[Trigger] 사용자가 /make-radio [주제1] [주제2] [주제3]�
 
 ---
 
-### STEP 0: 출력 폴더 준비
+### STEP 0: 출력 폴더 준비 & 주제 결정
 ```
 .radio_output/ 폴더가 없으면 생성한다.
 기존 파일이 있으면 덮어쓰기 전에 사용자에게 확인을 요청한다.
 ```
+
+**주제 결정 (2가지 경로):**
+
+**A) 주제 직접 입력** — `$ARGUMENTS`에 주제가 3개 이상 있을 때: 해당 인수를 그대로 사용.
+
+**B) 트렌드 자동 수집** — `$ARGUMENTS`가 비어있거나 주제가 3개 미만일 때:
+```bash
+cd /c/radio-dj-studio && node .radio_output/run_00_trend_fetcher.mjs
+```
+완료 후 `.radio_output/00_trends.json`의 `topics` 배열 3개를 이후 단계의 주제로 사용한다.
 
 ---
 

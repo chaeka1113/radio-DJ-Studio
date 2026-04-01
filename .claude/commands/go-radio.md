@@ -1,20 +1,24 @@
 ---
 name: go-radio
-description: "[Trigger] 사용자가 /go-radio [주제1] [주제2] [주제3] (또는 --qa 플래그 포함)을 실행할 때. [Action] --qa 플래그를 파싱하고 대본(01)→DJ멘트(02)→캐스팅(03)→[즉문즉답(08, --qa시만)]→스토리보드(04)→이미지(05)→TTS합본(07)→웹대시보드(서버 실행) 전체 파이프라인을 순서대로 실행한다. 결과를 .radio_output/에 저장하고 http://localhost:3000 대시보드를 제공."
+description: "[Trigger] 사용자가 /go-radio (또는 /go-radio [주제1] [주제2] [주제3], --qa 플래그 포함)을 실행할 때. [Action] 주제 미입력 시 Yahoo Japan+NHK RSS로 트렌드를 자동 수집한다. --qa 플래그를 파싱하고 트렌드수집(00, 자동모드)→대본(01)→DJ멘트(02)→캐스팅(03)→[즉문즉답(08, --qa시만)]→스토리보드(04)→이미지(05)→TTS합본(07)→웹대시보드(서버 실행) 전체 파이프라인을 순서대로 실행한다. 결과를 .radio_output/에 저장하고 http://localhost:3000 대시보드를 제공."
 ---
 
 # /go-radio
 
-テンキ爺ラジオ 유튜브 영상 자동화 파이프라인. `--qa` 플래그로 즉문즉답 코너 추가.
+テンキ爺ラジオ 유튜브 영상 자동화 파이프라인.
+주제를 입력하거나 생략하면 Yahoo Japan + NHK RSS 트렌드를 자동 수집한다.
+`--qa` 플래그로 즉문즉답 코너 추가.
 
 ## 사용법
 ```
-/go-radio [주제1] [주제2] [주제3]
-/go-radio [주제1] [주제2] [주제3] --qa
+/go-radio                              ← 트렌드 자동 수집 (주제 생략)
+/go-radio [주제1] [주제2] [주제3]       ← 주제 직접 입력
+/go-radio [주제1] [주제2] [주제3] --qa ← QA 코너 추가
 ```
 
 ## 예시
 ```
+/go-radio
 /go-radio 健康 老後資金 熟年離婚
 /go-radio 健康 老後資金 熟年離婚 --qa
 ```
@@ -25,7 +29,7 @@ description: "[Trigger] 사용자가 /go-radio [주제1] [주제2] [주제3] (�
 
 ```bash
 # .env 확인
-ls /c/radio-dj-studio/.env 2>/dev/null || echo "❌ 없음 → cp .env.example .env 후 GEMINI_API_KEY 입력"
+ls /c/radio-dj-studio/.env 2>/dev/null || echo "❌ 없음 → cp .env.example .env 후 API 키 입력"
 
 # 폴더 준비
 mkdir -p /c/radio-dj-studio/.radio_output/{images,videos,audio}
@@ -37,11 +41,23 @@ echo "KEY: ${GEMINI_API_KEY:0:10}..."
 
 ---
 
-## STEP 0 — 플래그 파싱
+## STEP 0 — 플래그 파싱 & 주제 결정
 
 `$ARGUMENTS`에서 `--qa` 감지:
-- 포함 → `QA_MODE=true`, 주제는 나머지 3개 인수
+- 포함 → `QA_MODE=true`, 주제는 나머지 인수
 - 미포함 → `QA_MODE=false`
+
+**주제 결정 (2가지 경로):**
+
+**A) 주제 직접 입력** (`$ARGUMENTS`에 주제가 3개 이상 있을 때):
+- `$ARGUMENTS`의 비-플래그 인수 3개를 주제로 사용
+
+**B) 트렌드 자동 수집** (`$ARGUMENTS`가 비어있거나 주제가 3개 미만일 때):
+```bash
+cd /c/radio-dj-studio && node .radio_output/run_00_trend_fetcher.mjs
+```
+완료 조건: `.radio_output/00_trends.json` 생성 및 `topics` 배열 3개 확인.
+생성된 주제를 이후 단계에서 사용한다.
 
 ---
 
