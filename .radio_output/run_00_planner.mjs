@@ -29,8 +29,21 @@ if (!API_KEY) { console.error('❌ ANTHROPIC_API_KEY 없음'); process.exit(1); 
 const allArgs = process.argv.slice(2);
 const includeMz = allArgs.includes('--mz');
 const includeQna = allArgs.includes('--qna');
-const topics = allArgs.filter(a => !a.startsWith('--'));
-if (topics.length < 3) { console.error('❌ 주제 3개 필요'); process.exit(1); }
+let topics = allArgs.filter(a => !a.startsWith('--'));
+
+// 주제 미입력 시 00_trends.json 폴백
+if (topics.length < 3) {
+  const trendsPath = path.join(__dirname, '00_trends.json');
+  if (fs.existsSync(trendsPath)) {
+    const trends = JSON.parse(fs.readFileSync(trendsPath, 'utf-8'));
+    if (Array.isArray(trends.topics) && trends.topics.length >= 3) {
+      topics = trends.topics.slice(0, 3);
+      console.log(`📡 [Planner] 트렌드 자동 수집 주제 사용:`);
+      topics.forEach((t, i) => console.log(`   주제${i + 1}: ${t}`));
+    }
+  }
+  if (topics.length < 3) { console.error('❌ 주제 3개 필요 (직접 입력하거나 run_00_trend_fetcher.mjs 를 먼저 실행하세요)'); process.exit(1); }
+}
 
 // 이전 피드백 파일 초기화 (새 파이프라인 시작 시 stale 피드백 제거)
 const feedbackPath = path.join(__dirname, '01_qa_feedback.json');

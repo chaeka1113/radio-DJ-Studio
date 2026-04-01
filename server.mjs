@@ -57,9 +57,49 @@ function runScript(sse, scriptName, args = []) {
 
 // 01 대본 생성
 app.post('/api/generate-scripts', async (req, res) => {
-  const { topics, includeMz, includeQna } = req.body;
-  if (!topics || topics.length < 3) return res.status(400).json({ error: '주제 3개 필요' });
+  const { topics, includeMz, includeQna, autoTrend } = req.body;
   const sse = sseStream(res);
+
+  // autoTrend 모드: run_00_trend_fetcher.mjs 실행 후 stdout에서 주제 파싱
+  let finalTopics = topics;
+  if (autoTrend) {
+    sse.log('🌐 [Trend Fetcher] RSS 트렌드 자동 수집 시작...');
+    const trendTopics = await new Promise((resolve) => {
+      let found = null;
+      const child = spawn('node', ['run_00_trend_fetcher.mjs'], {
+        cwd: RADIO_DIR,
+        env: { ...process.env, ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY },
+      });
+      child.stdout.on('data', (d) => {
+        const lines = d.toString().split('\n').filter(Boolean);
+        for (const line of lines) {
+          if (line.startsWith('TOPICS:')) {
+            found = line.replace('TOPICS:', '').split('|').map(t => t.trim()).filter(Boolean);
+          } else {
+            sse.log(line);
+          }
+        }
+      });
+      child.stderr.on('data', (d) => d.toString().split('\n').filter(Boolean).forEach(l => sse.err(l)));
+      child.on('close', () => resolve(found));
+    });
+
+    if (trendTopics && trendTopics.length >= 3) {
+      finalTopics = trendTopics.slice(0, 3);
+      sse.log(`TREND_TOPICS:${finalTopics.join('|')}`);
+      sse.log(`✅ [Trend Fetcher] 주제 자동 선별: ${finalTopics.join(' / ')}`);
+    } else {
+      // 트렌드 수집 실패 → 기존 topics로 fallback
+      if (!topics || topics.filter(Boolean).length < 3) {
+        sse.err('❌ 트렌드 수집 실패 & 주제 미입력 — 파이프라인 중단');
+        return sse.done(1);
+      }
+      sse.log('⚠️ 트렌드 수집 실패 — 입력된 주제로 대체 진행');
+      finalTopics = topics;
+    }
+  } else {
+    if (!finalTopics || finalTopics.length < 3) return res.status(400).json({ error: '주제 3개 필요' });
+  }
 
   // PATCH 1: 이전 결과 파일 삭제 (캐시/동기화 문제 방지)
   const outputJsonFiles = [
@@ -92,7 +132,7 @@ app.post('/api/generate-scripts', async (req, res) => {
   // PATCH 3: MZ 플래그 로그
   sse.log('🔥 MZ 플래그: ' + (includeMz ? 'ON' : 'OFF'));
 
-  const pipelineArgs = [...topics.slice(0, 3), ...(includeMz ? ['--mz'] : []), ...(includeQna ? ['--qna'] : [])];
+  const pipelineArgs = [...finalTopics.slice(0, 3), ...(includeMz ? ['--mz'] : []), ...(includeQna ? ['--qna'] : [])];
 
   // STEP 0: Planner — 에피소드 계약서 생성
   sse.log('📋 [Planner] 에피소드 완료 기준서 생성 중...');
