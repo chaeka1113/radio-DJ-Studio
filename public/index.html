@@ -45,6 +45,9 @@
   <button onclick="runFullPipeline()" class="bg-amber-500 hover:bg-amber-400 text-black font-bold px-4 py-1.5 rounded text-sm whitespace-nowrap transition-colors">
     🎙 全工程 生成
   </button>
+  <button onclick="runFullPipeline(true)" class="bg-blue-500 hover:bg-blue-400 text-black font-bold px-4 py-1.5 rounded text-sm whitespace-nowrap transition-colors">
+    🌐 트렌드 자동 생성
+  </button>
 </div>
 
 <!-- ===== PIPELINE STEP BUTTONS ===== -->
@@ -270,20 +273,24 @@ function closeTranslation() {
 }
 
 // ─── Pipeline Execution ───────────────────────────────────────────────────────
-async function runFullPipeline() {
-  const t1 = document.getElementById('topic1').value.trim();
-  const t2 = document.getElementById('topic2').value.trim();
-  const t3 = document.getElementById('topic3').value.trim();
-  if (!t1 || !t2 || !t3) { showToast('❌ 주제 3개를 모두 입력하세요', 2000); return; }
+async function runFullPipeline(autoTrend = false) {
+  let topics = ['', '', ''];
+  if (!autoTrend) {
+    const t1 = document.getElementById('topic1').value.trim();
+    const t2 = document.getElementById('topic2').value.trim();
+    const t3 = document.getElementById('topic3').value.trim();
+    if (!t1 || !t2 || !t3) { showToast('❌ 주제 3개를 모두 입력하세요', 2000); return; }
+    topics = [t1, t2, t3];
+  }
 
   showLog();
-  appendLog('=== 全工程 パイプライン 開始 ===', 'log');
+  appendLog(autoTrend ? '=== 🌐 트렌드 자동 파이프라인 開始 ===' : '=== 全工程 パイプライン 開始 ===', 'log');
 
   // 01 대본
   const _includeMz = document.getElementById('includeMz').checked;
   const _includeQna = document.getElementById('includeQna').checked;
   if (_includeMz) appendLog('🔥 MZ 모드 체크됨 — --mz 플래그 전송 중', 'log');
-  let r = await streamStep('/api/generate-scripts', { topics: [t1, t2, t3], includeMz: _includeMz, includeQna: _includeQna });
+  let r = await streamStep('/api/generate-scripts', { topics, includeMz: _includeMz, includeQna: _includeQna, autoTrend });
   if (!r.success) { setDot('01', 'red'); appendLog('❌ 01 대본 실패 — 파이프라인 중단', 'error'); showToast('❌ 01 대본 생성 실패'); return; }
   await loadScripts(); setDot('01', 'green'); setTab('scripts');
 
@@ -369,8 +376,20 @@ function streamStep(url, body) {
             if (!part.startsWith('data: ')) continue;
             try {
               const evt = JSON.parse(part.slice(6));
-              if (evt.type === 'log') appendLog(evt.message, 'log');
-              else if (evt.type === 'error') appendLog(evt.message, 'error');
+              if (evt.type === 'log') {
+                // TREND_TOPICS 특수 로그 감지 → input 박스 자동 채움
+                if (evt.message.startsWith('TREND_TOPICS:')) {
+                  const tTopics = evt.message.replace('TREND_TOPICS:', '').split('|');
+                  if (tTopics.length >= 3) {
+                    document.getElementById('topic1').value = tTopics[0].trim();
+                    document.getElementById('topic2').value = tTopics[1].trim();
+                    document.getElementById('topic3').value = tTopics[2].trim();
+                    showToast('🌐 트렌드 주제 자동 입력 완료');
+                  }
+                } else {
+                  appendLog(evt.message, 'log');
+                }
+              } else if (evt.type === 'error') appendLog(evt.message, 'error');
               else if (evt.type === 'done') { resolve({ success: evt.code === 0 }); return; }
             } catch {}
           }

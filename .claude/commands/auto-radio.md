@@ -1,19 +1,22 @@
 ---
 name: auto-radio
-description: "[Trigger] 사용자가 /auto-radio [주제1] [주제2] [주제3]을 실행할 때. [Action] .env 환경 검증 후 대본(01)→DJ멘트(02)→캐스팅+스토리보드(03+04)→이미지(05)→TTS합본(07) 전체 파이프라인을 순서대로 실행하고 결과를 .radio_output/에 저장한다. 완료 후 파일 목록 및 통계를 보고."
+description: "[Trigger] 사용자가 /auto-radio (또는 /auto-radio [주제1] [주제2] [주제3])을 실행할 때. [Action] 주제 미입력 시 Yahoo Japan+NHK RSS로 트렌드를 자동 수집한다. .env 환경 검증 후 트렌드수집(00, 자동모드)→대본(01)→DJ멘트(02)→캐스팅+스토리보드(03+04)→이미지(05)→TTS합본(07) 전체 파이프라인을 순서대로 실행하고 결과를 .radio_output/에 저장한다. 완료 후 파일 목록 및 통계를 보고."
 ---
 
 # /auto-radio
 
 Google AI Studio (Gemini + Imagen 3 + Veo 2) 기반 구닥다리 로봇 DJ 라디오 유튜브 영상 자동화 팩토리를 실행한다.
+주제를 생략하면 Yahoo Japan + NHK RSS 트렌드를 자동 수집한다.
 
 ## 사용법
 ```
-/auto-radio [주제1] [주제2] [주제3]
+/auto-radio                        ← 트렌드 자동 수집 (주제 생략)
+/auto-radio [주제1] [주제2] [주제3] ← 주제 직접 입력
 ```
 
 ## 예시
 ```
+/auto-radio
 /auto-radio 失恋 定年退職 故郷への帰省
 /auto-radio 첫사랑 은퇴 어머니의 손편지
 ```
@@ -26,7 +29,7 @@ Google AI Studio (Gemini + Imagen 3 + Veo 2) 기반 구닥다리 로봇 DJ 라�
 
 ---
 
-### [STEP 0] 초기화 및 환경 검증
+### [STEP 0] 초기화, 환경 검증, 주제 결정
 
 아래 체크를 순서대로 실행하라:
 
@@ -34,6 +37,16 @@ Google AI Studio (Gemini + Imagen 3 + Veo 2) 기반 구닥다리 로봇 DJ 라�
 # 1. .env 파일 존재 확인
 ls /c/radio-dj-studio/.env 2>/dev/null || echo "MISSING"
 ```
+
+**주제 결정 (2가지 경로):**
+
+**A) 주제 직접 입력** — `$ARGUMENTS`에 주제가 3개 이상 있을 때: 해당 인수를 그대로 사용.
+
+**B) 트렌드 자동 수집** — `$ARGUMENTS`가 비어있거나 주제가 3개 미만일 때:
+```bash
+cd /c/radio-dj-studio && node .radio_output/run_00_trend_fetcher.mjs
+```
+완료 후 `.radio_output/00_trends.json`의 `topics` 배열 3개를 이후 단계의 주제로 사용한다.
 
 **.env 파일이 없거나 API 키가 미입력 상태면**:
 ```
