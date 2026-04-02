@@ -15,7 +15,7 @@ const SILENCE_SEC = 1.5; // 세그먼트 간 묵음 (초)
 let HAS_FFMPEG = false;
 try { execSync('ffmpeg -version', { stdio: 'ignore' }); HAS_FFMPEG = true; } catch { /* fallback */ }
 
-// 묵음 파일은 파이프라인 시작 시 한 번만 생성 → 모든 청크가 공유 (재발 방지)
+// 묵음 파일은 파이프라인 시작 시 한 번만 생성 → 모든 청크가 공유
 const GLOBAL_TMP_DIR = path.join(os.tmpdir(), `radio_global_${Date.now()}`);
 fs.mkdirSync(GLOBAL_TMP_DIR, { recursive: true });
 const SILENCE_FILE = path.join(GLOBAL_TMP_DIR, 'silence_1.5s.mp3');
@@ -77,10 +77,9 @@ function cleanForTTS(text) {
   [/ジジジ+/g, /ガガ+/g, /ブーン+/g, /ギギギ+/g, /ザザッ+/g, /ジー+/g].forEach(p => { text = text.replace(p, ''); });
   // 2. 일본어 괄호 행동묘사 제거 （）
   text = text.replace(/（[^）]*）/g, '');
-  // 3. 일본어 문자 포함 브래킷 태그 제거 ([間][溜息][荒々しく...] 등 구 Japanese 지문)
-  //    — 히라가나/카타카나/한자(\u3040-\u9fff)를 포함한 [] 태그 전부 삭제
+  // 3. 일본어 문자 포함 브래킷 태그 제거 ([間][溜息][荒々しく...] 등)
   text = text.replace(/\[[^\]]*[\u3040-\u9fff][^\]]*\]/g, '');
-  // 4. SSML 태그 제거 (<break time="..."/>, <speak> 등) — V3 미지원
+  // 4. SSML 태그 제거 — V3 미지원
   text = text.replace(/<[^>]+>/g, '');
   // 5. 영문 Audio Tag([sighs],[laughs] 등)는 그대로 통과 — V3 native 지원
   // 6. 공백 정리
@@ -141,7 +140,7 @@ async function callElevenLabs(text, voiceId, voiceSettings) {
         process.stdout.write(`\n   ⏳ 재시도 ${attempt + 1}/${MAX_RETRY} (${wait / 1000}초 후)... `);
         await new Promise(r => setTimeout(r, wait));
       } else {
-        // 최종 실패 — ref_audio_rules 클리닝 재적용 후 한 번 더
+        // 최종 실패 — 클리닝 강화 후 한 번 더
         const reClean = cleaned.replace(/\[[^\]]+\]/g, '').replace(/\s+/g, ' ').trim();
         if (reClean !== cleaned && reClean.length > 0) {
           process.stdout.write(`\n   🔄 클리닝 강화 후 최종 시도... `);
@@ -157,50 +156,94 @@ async function callElevenLabs(text, voiceId, voiceSettings) {
   }
 }
 
-// ── 청크 아이템 배열 구성 ─────────────────────────────────────────────────────
+// ── 청크 배열 구성 ─────────────────────────────────────────────────────────────
 const [ep1, ep2, ep3] = djScript.episodes;
 
 // V3 최적화 음성 설정
-// stability 낮출수록 감정 다이나믹 증가, style(style_exaggeration) 0.6+ = Audio Tag 확실 반영
-const DJ_VOICE_SETTINGS    = { stability: 0.38, similarity_boost: 0.80, style: 0.65, use_speaker_boost: true };
+const DJ_VOICE_SETTINGS     = { stability: 0.38, similarity_boost: 0.80, style: 0.65, use_speaker_boost: true };
 const CALLER_VOICE_SETTINGS = { stability: 0.50, similarity_boost: 0.75, style: 0.30, use_speaker_boost: false };
 
-const chunk1Items = [
-  { text: djScript.show_opening,  voiceId: DJ_VOICE_ID,                                                        label: '오프닝',       isDJ: true  },
-  { text: ep1.script,             voiceId: getCallerVoiceId(ep1.character?.age, ep1.character?.gender),        label: 'EP1 사연',     isDJ: false },
-  { text: ep1.dj_reaction,        voiceId: DJ_VOICE_ID,                                                        label: 'EP1 리액션',   isDJ: true  },
-  { text: ep1.dj_transition,      voiceId: DJ_VOICE_ID,                                                        label: 'EP1 트랜지션', isDJ: true  },
-];
-
-const chunk2Items = [
-  { text: ep2.script,             voiceId: getCallerVoiceId(ep2.character?.age, ep2.character?.gender),        label: 'EP2 사연',     isDJ: false },
-  { text: ep2.dj_reaction,        voiceId: DJ_VOICE_ID,                                                        label: 'EP2 리액션',   isDJ: true  },
-  { text: ep2.dj_transition,      voiceId: DJ_VOICE_ID,                                                        label: 'EP2 트랜지션', isDJ: true  },
-];
-
-const chunk3Items = [
-  { text: ep3.script,             voiceId: getCallerVoiceId(ep3.character?.age, ep3.character?.gender),        label: 'EP3 사연',     isDJ: false },
-  { text: ep3.dj_reaction,        voiceId: DJ_VOICE_ID,                                                        label: 'EP3 리액션',   isDJ: true  },
-];
-
+// ── 07 QA+클로징 아이템 동적 구성 ────────────────────────────────────────────
+const qaAndClosingItems = [];
 if (qaScript) {
-  chunk3Items.push({ text: qaScript.intro, voiceId: DJ_VOICE_ID, label: 'QA 인트로', isDJ: true });
+  qaAndClosingItems.push({ text: qaScript.intro, voiceId: DJ_VOICE_ID, label: 'QA 인트로', isDJ: true });
   qaScript.qa_pairs.forEach((qa, i) => {
-    chunk3Items.push({ text: qa.question, voiceId: getRandomCallerVoiceId(), label: `QA Q${i + 1}`, isDJ: false });
-    chunk3Items.push({ text: qa.answer,   voiceId: DJ_VOICE_ID,              label: `QA A${i + 1}`, isDJ: true  });
+    qaAndClosingItems.push({ text: qa.question, voiceId: getRandomCallerVoiceId(), label: `QA Q${i + 1}`, isDJ: false });
+    qaAndClosingItems.push({ text: qa.answer,   voiceId: DJ_VOICE_ID,              label: `QA A${i + 1}`, isDJ: true  });
   });
-  // ⚠️ qaScript.outro는 run_02_dj.mjs에서 djScript.show_closing을 그대로 복사한 값이므로
-  //    여기에 push하면 아래 show_closing과 완전 동일한 텍스트가 2번 TTS 전송된다 → 반드시 생략
+  // ⚠️ qaScript.outro == djScript.show_closing 이므로 outro는 생략 — show_closing 한 번만 추가
 }
+qaAndClosingItems.push({ text: djScript.show_closing, voiceId: DJ_VOICE_ID, label: '엔딩', isDJ: true });
 
-// 방송 전체의 마지막에 단 한 번만 엔딩 삽입 (QA 유무 무관)
-chunk3Items.push({ text: djScript.show_closing, voiceId: DJ_VOICE_ID, label: '엔딩', isDJ: true });
+// ── 동적 audioChunks 배열 (순서 = 영상 씬 순서와 1:1 대응) ───────────────────
+const audioChunks = [
+  {
+    id: '00_opening',
+    label: '오프닝',
+    items: [
+      { text: djScript.show_opening, voiceId: DJ_VOICE_ID, label: '오프닝', isDJ: true },
+    ],
+  },
+  {
+    id: '01_ep1_story',
+    label: 'EP1 사연',
+    items: [
+      { text: ep1.script, voiceId: getCallerVoiceId(ep1.character?.age, ep1.character?.gender), label: 'EP1 사연', isDJ: false },
+    ],
+  },
+  {
+    id: '02_ep1_dj',
+    label: 'EP1 DJ 멘트',
+    // .filter: dj_transition 없는 에피소드에서 빈 아이템이 TTS 호출로 넘어가는 것 방지
+    items: [
+      { text: ep1.dj_reaction,   voiceId: DJ_VOICE_ID, label: 'EP1 리액션',   isDJ: true },
+      { text: ep1.dj_transition, voiceId: DJ_VOICE_ID, label: 'EP1 트랜지션', isDJ: true },
+    ].filter(item => item.text?.trim()),
+  },
+  {
+    id: '03_ep2_story',
+    label: 'EP2 사연',
+    items: [
+      { text: ep2.script, voiceId: getCallerVoiceId(ep2.character?.age, ep2.character?.gender), label: 'EP2 사연', isDJ: false },
+    ],
+  },
+  {
+    id: '04_ep2_dj',
+    label: 'EP2 DJ 멘트',
+    items: [
+      { text: ep2.dj_reaction,   voiceId: DJ_VOICE_ID, label: 'EP2 리액션',   isDJ: true },
+      { text: ep2.dj_transition, voiceId: DJ_VOICE_ID, label: 'EP2 트랜지션', isDJ: true },
+    ].filter(item => item.text?.trim()),
+  },
+  {
+    id: '05_ep3_story',
+    label: 'EP3 사연',
+    items: [
+      { text: ep3.script, voiceId: getCallerVoiceId(ep3.character?.age, ep3.character?.gender), label: 'EP3 사연', isDJ: false },
+    ],
+  },
+  {
+    id: '06_ep3_dj',
+    label: 'EP3 DJ 멘트',
+    // ep3.dj_transition: QA 코너 진입 전 브리지가 있을 경우 포함
+    items: [
+      { text: ep3.dj_reaction,   voiceId: DJ_VOICE_ID, label: 'EP3 리액션',   isDJ: true },
+      { text: ep3.dj_transition, voiceId: DJ_VOICE_ID, label: 'EP3 트랜지션', isDJ: true },
+    ].filter(item => item.text?.trim()),
+  },
+  {
+    id: '07_qa_and_closing',
+    label: qaScript ? 'QA + 엔딩' : '엔딩',
+    items: qaAndClosingItems,
+  },
+];
 
 // ── 청크 처리 함수 (FFmpeg 묵음 삽입 포함) ───────────────────────────────────
-async function processChunk(items, chunkNum) {
-  console.log(`\n🎙️  Chunk ${chunkNum} 처리 중 (${items.length}개 대사)...`);
+async function processChunk(chunk) {
+  const { id, label, items } = chunk;
+  console.log(`\n🎙️  [${id}] ${label} 처리 중 (${items.length}개 대사)...`);
 
-  const tmpDir = path.join(os.tmpdir(), `radio_c${chunkNum}_${Date.now()}`);
+  const tmpDir = path.join(os.tmpdir(), `radio_${id}_${Date.now()}`);
   fs.mkdirSync(tmpDir, { recursive: true });
   const segFiles = [];
 
@@ -228,10 +271,8 @@ async function processChunk(items, chunkNum) {
 
   let result;
   if (HAS_FFMPEG && segFiles.length > 1 && fs.existsSync(SILENCE_FILE)) {
-    // ── 전역 silence_1.5s.mp3를 재사용해 세그먼트 사이 묵음 삽입 ──────────────
+    // 전역 silence_1.5s.mp3를 재사용해 세그먼트 사이 묵음 삽입
     try {
-      // concat 리스트: seg0 → silence → seg1 → silence → seg2 ...
-      // Windows 경로 호환: 슬래시를 이중 역슬래시 대신 정방향 슬래시로 정규화
       const normalize = (p) => p.replace(/\\/g, '/');
       const concatListFile = path.join(tmpDir, 'list.txt');
       const entries = segFiles.flatMap((f, i) =>
@@ -295,26 +336,85 @@ if (!fs.existsSync(audioDir)) fs.mkdirSync(audioDir, { recursive: true });
 console.log('🎬 ElevenLabs TTS 파이프라인 시작 (eleven_v3)');
 console.log(`📋 규칙: ref_tts_v3_rules.md 로드됨 (${referenceKnowledge.split('\n').length}줄)`);
 console.log(`🎛️  DJ 설정: stability=${DJ_VOICE_SETTINGS.stability} / style=${DJ_VOICE_SETTINGS.style}`);
+console.log(`📦 총 ${audioChunks.length}개 오디오 모듈 생성 예정`);
 
-for (const { num, items } of [
-  { num: 1, items: chunk1Items },
-  { num: 2, items: chunk2Items },
-  { num: 3, items: chunk3Items },
-]) {
-  const merged = await processChunk(items, num);
-  const outPath = path.join(audioDir, `chunk_${num}.mp3`);
+// 영상 파이프라인 연동용 매니페스트
+const manifest = { generated_at: new Date().toISOString(), chunks: [] };
+
+for (const chunk of audioChunks) {
+  const merged = await processChunk(chunk);
+  if (merged.length === 0) {
+    console.log(`⏭  ${chunk.id}.mp3 스킵 (빈 결과)`);
+    continue;
+  }
+  const outPath = path.join(audioDir, `${chunk.id}.mp3`);
   fs.writeFileSync(outPath, merged);
-  console.log(`✅ chunk_${num}.mp3 저장 완료 (${(merged.length / 1024).toFixed(1)} KB)`);
+  const sizeKB = parseFloat((merged.length / 1024).toFixed(1));
+  console.log(`✅ ${chunk.id}.mp3 저장 완료 (${sizeKB} KB)`);
+  manifest.chunks.push({
+    id: chunk.id,
+    label: chunk.label,
+    file: `audio/${chunk.id}.mp3`,
+    size_kb: sizeKB,
+    item_count: chunk.items.length,
+  });
 }
 
-// ── 가비지 컬렉션: 전역 임시 파일(silence_1.5s.mp3 등) 삭제 ─────────────────
+// 매니페스트 저장 (영상 파이프라인에서 청크 목록/메타데이터 참조용)
+fs.writeFileSync(path.join(__dirname, '09_audio_manifest.json'), JSON.stringify(manifest, null, 2), 'utf-8');
+console.log('📋 09_audio_manifest.json 저장 완료 (영상 파이프라인 연동용)');
+
+// ── 가비지 컬렉션: 전역 임시 파일 삭제 ──────────────────────────────────────
 try {
   fs.rmSync(GLOBAL_TMP_DIR, { recursive: true, force: true });
   console.log('🗑  임시 파일 정리 완료 (silence_1.5s.mp3)');
 } catch { /* 정리 실패는 무시 */ }
 
+const ep3HasTransition = !!ep3.dj_transition?.trim();
 console.log('\n🎉 TTS 전체 완료!');
 console.log('📁 .radio_output/audio/');
-console.log('   ├── chunk_1.mp3  (오프닝 → EP1)');
-console.log('   ├── chunk_2.mp3  (EP2)');
-console.log(`   └── chunk_3.mp3  (EP3${qaScript ? ' → QA' : ''} → 엔딩)`);
+console.log('   ├── 00_opening.mp3          (오프닝)');
+console.log('   ├── 01_ep1_story.mp3        (EP1 사연)');
+console.log('   ├── 02_ep1_dj.mp3           (EP1 리액션 + 트랜지션)');
+console.log('   ├── 03_ep2_story.mp3        (EP2 사연)');
+console.log('   ├── 04_ep2_dj.mp3           (EP2 리액션 + 트랜지션)');
+console.log('   ├── 05_ep3_story.mp3        (EP3 사연)');
+console.log(`   ├── 06_ep3_dj.mp3           (EP3 리액션${ep3HasTransition ? ' + 트랜지션' : ''})`);
+console.log(`   └── 07_qa_and_closing.mp3   (${qaScript ? 'QA + ' : ''}엔딩)`);
+console.log('📋 .radio_output/09_audio_manifest.json (영상 파이프라인 연동)');
+
+// ── EP별 사연 오디오 재생 시간 측정 → ep_durations.json ──────────────────────
+if (HAS_FFMPEG) {
+  console.log('\n📊 EP별 사연 오디오 길이 측정 중...');
+  const epAudioFiles = [
+    { key: 'ep1', file: 'audio/01_ep1_story.mp3' },
+    { key: 'ep2', file: 'audio/03_ep2_story.mp3' },
+    { key: 'ep3', file: 'audio/05_ep3_story.mp3' },
+  ];
+  const durations = {};
+  for (const { key, file } of epAudioFiles) {
+    const filePath = path.join(__dirname, file);
+    if (fs.existsSync(filePath)) {
+      try {
+        const dur = parseFloat(execSync(
+          `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`
+        ).toString().trim());
+        durations[`${key}_script_sec`] = dur;
+        durations[`${key}_audio_path`] = file;
+        console.log(`   ✅ ${key}: ${dur.toFixed(1)}초 (${file})`);
+      } catch (err) {
+        console.warn(`   ⚠️ ${key} 측정 실패: ${err.message.slice(0, 60)}`);
+      }
+    } else {
+      console.warn(`   ⚠️ ${key} 파일 없음: ${file}`);
+    }
+  }
+  fs.writeFileSync(
+    path.join(__dirname, 'audio/ep_durations.json'),
+    JSON.stringify(durations, null, 2),
+    'utf-8'
+  );
+  console.log('📊 audio/ep_durations.json 저장 완료 (영상 파이프라인 연동용)');
+} else {
+  console.log('⚠️ FFmpeg 없음 — ep_durations.json 생성 스킵');
+}

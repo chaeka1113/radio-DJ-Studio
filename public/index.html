@@ -34,20 +34,35 @@
     <span id="dot-04" class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-gray-600"></span>스토리보드</span>
     <span id="dot-05" class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-gray-600"></span>이미지</span>
     <span id="dot-07" class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-gray-600"></span>TTS</span>
+    <span id="dot-08" class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-gray-600"></span>켄번스</span>
+    <span id="dot-09" class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-gray-600"></span>영상편집</span>
   </div>
 </header>
 
 <!-- ===== TOPIC INPUT BAR ===== -->
-<div class="bg-gray-800 border-b border-gray-700 px-5 py-3 flex gap-3 items-center shrink-0">
-  <input id="topic1" type="text" placeholder="テーマ1 (예: 健康)" class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-amber-500">
-  <input id="topic2" type="text" placeholder="テーマ2 (예: 財テク)" class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-amber-500">
-  <input id="topic3" type="text" placeholder="テーマ3 (예: ロマンス)" class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-amber-500">
-  <button onclick="runFullPipeline()" class="bg-amber-500 hover:bg-amber-400 text-black font-bold px-4 py-1.5 rounded text-sm whitespace-nowrap transition-colors">
-    🎙 全工程 生成
-  </button>
-  <button onclick="runFullPipeline(true)" class="bg-blue-500 hover:bg-blue-400 text-black font-bold px-4 py-1.5 rounded text-sm whitespace-nowrap transition-colors">
-    🌐 트렌드 자동 생성
-  </button>
+<div class="bg-gray-800 border-b border-gray-700 px-5 py-3 flex gap-3 items-end shrink-0">
+  <div class="flex-1 flex flex-col gap-1">
+    <input id="topic1" type="text" placeholder="テーマ1 (예: 健康)" class="bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-amber-500">
+    <span id="topic1-ko" class="text-xs text-amber-400 px-1 h-4"></span>
+  </div>
+  <div class="flex-1 flex flex-col gap-1">
+    <input id="topic2" type="text" placeholder="テーマ2 (예: 財テク)" class="bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-amber-500">
+    <span id="topic2-ko" class="text-xs text-amber-400 px-1 h-4"></span>
+  </div>
+  <div class="flex-1 flex flex-col gap-1">
+    <input id="topic3" type="text" placeholder="テーマ3 (예: ロマンス)" class="bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-amber-500">
+    <span id="topic3-ko" class="text-xs text-amber-400 px-1 h-4"></span>
+  </div>
+  <div class="flex flex-col gap-1 pb-5">
+    <button onclick="runFullPipeline()" class="bg-amber-500 hover:bg-amber-400 text-black font-bold px-4 py-1.5 rounded text-sm whitespace-nowrap transition-colors">
+      🎙 全工程 生成
+    </button>
+  </div>
+  <div class="flex flex-col gap-1 pb-5">
+    <button onclick="runFullPipeline(true)" class="bg-blue-500 hover:bg-blue-400 text-black font-bold px-4 py-1.5 rounded text-sm whitespace-nowrap transition-colors">
+      🌐 트렌드 자동 생성
+    </button>
+  </div>
 </div>
 
 <!-- ===== PIPELINE STEP BUTTONS ===== -->
@@ -67,6 +82,8 @@
   <button onclick="runStep('05', false)" class="step-btn px-3 py-1 rounded text-xs bg-gray-700 hover:bg-amber-600 transition-colors">🖼 05 이미지 (없는것만)</button>
   <button onclick="runStep('05', true)" class="step-btn px-3 py-1 rounded text-xs bg-gray-700 hover:bg-red-700 transition-colors">🗑🖼 05 이미지 (전체 강제재생성)</button>
   <button onclick="runStep('07')" class="step-btn px-3 py-1 rounded text-xs bg-gray-700 hover:bg-amber-600 transition-colors">🎧 07 TTS스크립트</button>
+  <button onclick="runStep('kenburns')" class="step-btn px-3 py-1 rounded text-xs bg-gray-700 hover:bg-amber-600 transition-colors">🎬 켄 번스 영상</button>
+  <button onclick="runStep('finalvideo')" class="step-btn px-3 py-1 rounded text-xs bg-gray-700 hover:bg-red-600 transition-colors">🎞 최종 영상 조립</button>
   <div class="flex-1"></div>
   <button onclick="refreshAll()" class="px-3 py-1 rounded text-xs bg-gray-700 hover:bg-gray-600 transition-colors">🔄 데이터 새로고침</button>
 </div>
@@ -318,7 +335,7 @@ async function runFullPipeline(autoTrend = false) {
   await loadAudio(); setDot('07', 'green'); setTab('audio');
 
   appendLog('=== ✅ 全工程 完了 ===', 'log');
-  showToast('🎉 전체 파이프라인 완료!');
+  showToast('🎉 전체 파이프라인 완료! videos_final/ 확인하세요');
 }
 
 async function runStep(step, force = false) {
@@ -338,6 +355,8 @@ async function runStep(step, force = false) {
     '04': ['/api/generate-storyboard', () => ({})],
     '05': ['/api/generate-images', () => ({ force })],
     '07': ['/api/generate-audio-script', () => ({})],
+    'kenburns':   ['/api/generate-kenburns',    () => ({})],
+    'finalvideo': ['/api/generate-final-video', () => ({})],
   };
 
   const [url, getBody] = endpoints[step] || [];
@@ -352,6 +371,8 @@ async function runStep(step, force = false) {
   if (step === '04') { await loadStoryboard(); setDot('04', 'green'); }
   if (step === '05') { await loadGallery(); setDot('05', 'green'); }
   if (step === '07') { await loadAudio(); setDot('07', 'green'); setTab('audio'); }
+  if (step === 'kenburns')   setDot('08', 'green');
+  if (step === 'finalvideo') setDot('09', 'green');
 }
 
 function streamStep(url, body) {
@@ -388,6 +409,10 @@ function streamStep(url, body) {
                   }
                 } else {
                   appendLog(evt.message, 'log');
+                  // 켄 번스 완료 감지
+                  if (evt.message.includes('✅ [켄 번스] 완료')) setDot('08', 'green');
+                  // 최종 편집 완료 감지
+                  if (evt.message.includes('✅ [편집] 완료')) setDot('09', 'green');
                 }
               } else if (evt.type === 'error') appendLog(evt.message, 'error');
               else if (evt.type === 'done') { resolve({ success: evt.code === 0 }); return; }

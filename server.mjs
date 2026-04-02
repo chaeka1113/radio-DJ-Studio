@@ -88,6 +88,26 @@ app.post('/api/generate-scripts', async (req, res) => {
       finalTopics = trendTopics.slice(0, 3);
       sse.log(`TREND_TOPICS:${finalTopics.join('|')}`);
       sse.log(`✅ [Trend Fetcher] 주제 자동 선별: ${finalTopics.join(' / ')}`);
+      // 한국어 번역 (대시보드 확인용 — 실제 대본에 영향 없음)
+      if (API_KEY) {
+        try {
+          const genAI = new GoogleGenerativeAI(API_KEY);
+          const model = genAI.getGenerativeModel({
+            model: 'gemini-2.5-flash',
+            generationConfig: { temperature: 0.3, maxOutputTokens: 256, thinkingConfig: { thinkingBudget: 0 } },
+          });
+          const result = await model.generateContent(
+            `다음 일본어 주제 3개를 한국어로 간결하게 번역해라 (각 5단어 이내). JSON 배열만 반환: ["번역1", "번역2", "번역3"]\n주제1: ${finalTopics[0]}\n주제2: ${finalTopics[1]}\n주제3: ${finalTopics[2]}`
+          );
+          const rawText = result.response.text().match(/\[[\s\S]*?\]/)?.[0];
+          if (rawText) {
+            const koTopics = JSON.parse(rawText);
+            if (koTopics.length >= 3) {
+              sse.log(`TREND_TOPICS_KO:${koTopics.join('|')}`);
+            }
+          }
+        } catch (_) { /* 번역 실패는 무시 */ }
+      }
     } else {
       // 트렌드 수집 실패 → 기존 topics로 fallback
       if (!topics || topics.filter(Boolean).length < 3) {
@@ -242,10 +262,45 @@ app.post('/api/generate-images', (req, res) => {
   runScript(sse, 'run_05_images.mjs').then(code => sse.done(code));
 });
 
-// 07 오디오 스크립트 생성
-app.post('/api/generate-audio-script', (req, res) => {
+// 07 오디오 → (자동 연결) 08 켄 번스 → 10 최종 편집
+// ※ run_07_audio.mjs 완료 직후 영상 파이프라인 자동 실행
+app.post('/api/generate-audio-script', async (req, res) => {
   const sse = sseStream(res);
-  runScript(sse, 'run_07_audio.mjs').then(code => sse.done(code));
+
+  const audioCode = await runScript(sse, 'run_07_audio.mjs');
+  if (audioCode !== 0) return sse.done(audioCode);
+
+  // STEP 8: 켄 번스 영상 생성
+  sse.log('🎬 [켄 번스] 씬별 영상 생성 중... (CPU만 사용, 시간 소요)');
+  const kbCode = await runScript(sse, 'run_08_kenburns.mjs');
+  if (kbCode !== 0) {
+    sse.log('⚠️ [켄 번스] 실패 — 최종 영상 조립 건너뜀');
+    return sse.done(kbCode);
+  }
+  sse.log('✅ [켄 번스] 완료');
+
+  // STEP 9: 최종 영상 조립
+  sse.log('🎞 [편집] 최종 영상 조립 중...');
+  const editorCode = await runScript(sse, 'run_10_editor.mjs');
+  if (editorCode !== 0) {
+    sse.log('⚠️ [편집] 최종 영상 조립 실패');
+    return sse.done(editorCode);
+  }
+  sse.log('✅ [편집] 완료 — videos_final/ 에 결과물 저장됨');
+
+  sse.done(0);
+});
+
+// 08 켄 번스 영상 (개별 실행)
+app.post('/api/generate-kenburns', (req, res) => {
+  const sse = sseStream(res);
+  runScript(sse, 'run_08_kenburns.mjs').then(code => sse.done(code));
+});
+
+// 10 최종 영상 조립 (개별 실행)
+app.post('/api/generate-final-video', (req, res) => {
+  const sse = sseStream(res);
+  runScript(sse, 'run_10_editor.mjs').then(code => sse.done(code));
 });
 
 // ─── 이미지 단일 재생성 ───────────────────────────────────────────────────────
