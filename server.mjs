@@ -433,6 +433,13 @@ app.put('/api/data/audio', (req, res) => {
   res.json({ success: true });
 });
 
+// ─── CapCut 프로젝트 생성 ─────────────────────────────────────────────────────
+
+app.post('/api/generate-capcut', (req, res) => {
+  const sse = sseStream(res);
+  runScript(sse, 'run_06_capcut_builder.mjs').then(code => sse.done(code));
+});
+
 // ─── Start ───────────────────────────────────────────────────────────────────
 
 app.listen(3000, () => {

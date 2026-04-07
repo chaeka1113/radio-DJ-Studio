@@ -84,6 +84,7 @@
   <button onclick="runStep('07')" class="step-btn px-3 py-1 rounded text-xs bg-gray-700 hover:bg-amber-600 transition-colors">🎧 07 TTS스크립트</button>
   <button onclick="runStep('kenburns')" class="step-btn px-3 py-1 rounded text-xs bg-gray-700 hover:bg-amber-600 transition-colors">🎬 켄 번스 영상</button>
   <button onclick="runStep('finalvideo')" class="step-btn px-3 py-1 rounded text-xs bg-gray-700 hover:bg-red-600 transition-colors">🎞 최종 영상 조립</button>
+  <button onclick="runStep('capcut')" class="step-btn px-3 py-1 rounded text-xs bg-gray-700 hover:bg-purple-600 transition-colors">🎬 CapCut 프로젝트 생성</button>
   <div class="flex-1"></div>
   <button onclick="refreshAll()" class="px-3 py-1 rounded text-xs bg-gray-700 hover:bg-gray-600 transition-colors">🔄 데이터 새로고침</button>
 </div>
@@ -357,6 +358,7 @@ async function runStep(step, force = false) {
     '07': ['/api/generate-audio-script', () => ({})],
     'kenburns':   ['/api/generate-kenburns',    () => ({})],
     'finalvideo': ['/api/generate-final-video', () => ({})],
+    'capcut':     ['/api/generate-capcut',      () => ({})],
   };
 
   const [url, getBody] = endpoints[step] || [];
