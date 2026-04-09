@@ -98,7 +98,7 @@ function callElevenLabsOnce(cleaned, voiceId, voiceSettings) {
   return new Promise((resolve, reject) => {
     const options = {
       hostname: 'api.elevenlabs.io',
-      path: `/v1/text-to-speech/${voiceId}`,
+      path: `/v1/text-to-speech/${voiceId}/with-timestamps`,
       method: 'POST',
       headers: {
         'xi-api-key': ELEVENLABS_API_KEY,
@@ -114,7 +114,13 @@ function callElevenLabsOnce(cleaned, voiceId, voiceSettings) {
           reject(new Error(`ElevenLabs ${res.statusCode}: ${Buffer.concat(chunks).toString().slice(0, 200)}`));
           return;
         }
-        resolve(Buffer.concat(chunks));
+        try {
+          const json = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
+          const audioBuffer = Buffer.from(json.audio_base64, 'base64');
+          resolve({ audioBuffer, alignment: json.alignment || null });
+        } catch (parseErr) {
+          reject(new Error(`JSON parse error: ${parseErr.message}`));
+        }
       });
     });
     req.on('error', reject);
@@ -124,9 +130,10 @@ function callElevenLabsOnce(cleaned, voiceId, voiceSettings) {
 }
 
 // ── ElevenLabs API 호출 (재시도 포함) ─────────────────────────────────────────
+// 반환: { audioBuffer: Buffer, alignment: object|null }
 async function callElevenLabs(text, voiceId, voiceSettings) {
   const cleaned = cleanForTTS(text);
-  if (!cleaned.trim()) return Buffer.alloc(0);
+  if (!cleaned.trim()) return { audioBuffer: Buffer.alloc(0), alignment: null };
 
   const MAX_RETRY = 2;
   const RETRY_DELAY = [3000, 6000];
@@ -239,6 +246,7 @@ const audioChunks = [
 ];
 
 // ── 청크 처리 함수 (FFmpeg 묵음 삽입 포함) ───────────────────────────────────
+// 반환: { merged: Buffer, alignments: Array<{label, alignment}> }
 async function processChunk(chunk) {
   const { id, label, items } = chunk;
   console.log(`\n🎙️  [${id}] ${label} 처리 중 (${items.length}개 대사)...`);
@@ -246,18 +254,20 @@ async function processChunk(chunk) {
   const tmpDir = path.join(os.tmpdir(), `radio_${id}_${Date.now()}`);
   fs.mkdirSync(tmpDir, { recursive: true });
   const segFiles = [];
+  const alignments = [];
 
   for (const item of items) {
     if (!item.text?.trim()) continue;
     process.stdout.write(`   [${item.label}] 생성 중... `);
     const voiceSettings = item.isDJ ? DJ_VOICE_SETTINGS : CALLER_VOICE_SETTINGS;
     try {
-      const buf = await callElevenLabs(item.text, item.voiceId, voiceSettings);
-      if (buf.length === 0) { process.stdout.write(`⏭ (빈 버퍼 스킵)\n`); continue; }
+      const { audioBuffer, alignment } = await callElevenLabs(item.text, item.voiceId, voiceSettings);
+      if (audioBuffer.length === 0) { process.stdout.write(`⏭ (빈 버퍼 스킵)\n`); continue; }
       const segFile = path.join(tmpDir, `seg_${segFiles.length}_${item.label.replace(/\s+/g, '_')}.mp3`);
-      fs.writeFileSync(segFile, buf);
+      fs.writeFileSync(segFile, audioBuffer);
       segFiles.push(segFile);
-      process.stdout.write(`✅ (${(buf.length / 1024).toFixed(1)} KB)\n`);
+      if (alignment) alignments.push({ label: item.label, voiceId: item.voiceId, alignment });
+      process.stdout.write(`✅ (${(audioBuffer.length / 1024).toFixed(1)} KB)\n`);
     } catch (err) {
       process.stdout.write(`❌ ${err.message.slice(0, 80)}\n`);
     }
@@ -266,7 +276,7 @@ async function processChunk(chunk) {
 
   if (segFiles.length === 0) {
     fs.rmSync(tmpDir, { recursive: true, force: true });
-    return Buffer.alloc(0);
+    return { merged: Buffer.alloc(0), alignments: [] };
   }
 
   let result;
@@ -300,7 +310,7 @@ async function processChunk(chunk) {
   }
 
   fs.rmSync(tmpDir, { recursive: true, force: true });
-  return result;
+  return { merged: result, alignments };
 }
 
 // ── final_script_for_tts.txt 생성 ────────────────────────────────────────────
@@ -342,19 +352,50 @@ console.log(`📦 총 ${audioChunks.length}개 오디오 모듈 생성 예정`);
 const manifest = { generated_at: new Date().toISOString(), chunks: [] };
 
 for (const chunk of audioChunks) {
-  const merged = await processChunk(chunk);
+  const outPath       = path.join(audioDir, `${chunk.id}.mp3`);
+  const tsPath        = path.join(audioDir, `${chunk.id}_timestamps.json`);
+
+  // [CRITICAL 멱등성] MP3 + _timestamps.json 둘 다 존재할 때만 스킵
+  if (fs.existsSync(outPath) && fs.existsSync(tsPath)) {
+    const sizeKB = parseFloat((fs.statSync(outPath).size / 1024).toFixed(1));
+    console.log(`⏭  ${chunk.id}.mp3 스킵 (MP3 + timestamps.json 이미 존재, ${sizeKB} KB)`);
+    manifest.chunks.push({
+      id: chunk.id,
+      label: chunk.label,
+      file: `audio/${chunk.id}.mp3`,
+      timestamps_file: `audio/${chunk.id}_timestamps.json`,
+      size_kb: sizeKB,
+      item_count: chunk.items.length,
+      skipped: true,
+    });
+    continue;
+  }
+
+  const { merged, alignments } = await processChunk(chunk);
   if (merged.length === 0) {
     console.log(`⏭  ${chunk.id}.mp3 스킵 (빈 결과)`);
     continue;
   }
-  const outPath = path.join(audioDir, `${chunk.id}.mp3`);
+
   fs.writeFileSync(outPath, merged);
   const sizeKB = parseFloat((merged.length / 1024).toFixed(1));
   console.log(`✅ ${chunk.id}.mp3 저장 완료 (${sizeKB} KB)`);
+
+  // alignment 저장 — 세그먼트 배열로 묶어서 저장
+  const tsData = {
+    chunk_id: chunk.id,
+    label: chunk.label,
+    generated_at: new Date().toISOString(),
+    segments: alignments,
+  };
+  fs.writeFileSync(tsPath, JSON.stringify(tsData, null, 2), 'utf-8');
+  console.log(`📍 ${chunk.id}_timestamps.json 저장 완료 (${alignments.length}개 세그먼트)`);
+
   manifest.chunks.push({
     id: chunk.id,
     label: chunk.label,
     file: `audio/${chunk.id}.mp3`,
+    timestamps_file: `audio/${chunk.id}_timestamps.json`,
     size_kb: sizeKB,
     item_count: chunk.items.length,
   });
