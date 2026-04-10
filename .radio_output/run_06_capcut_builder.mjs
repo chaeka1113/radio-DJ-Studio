@@ -511,17 +511,22 @@ function makeTransitionMat() {
   };
 }
 
-function makeVideoMat(sceneId) {
-  const imgPath = normPath(path.join(IMAGE_DIR, `${sceneId}.png`));
+function makeVideoMat(index) {
+  const imgName = `SC${String(index + 1).padStart(3, '0')}`;
+  const imgPath = path.resolve(IMAGE_DIR, `${imgName}.png`);
+  if (!fs.existsSync(imgPath)) {
+    console.error(`❌ 이미지 없음: ${imgPath}`);
+    process.exit(1);
+  }
   return {
     id: newUUID(), unique_id: '', type: 'photo',
     duration: 10800000000,
-    path: imgPath, media_path: '', local_id: '',
+    path: normPath(imgPath), media_path: '', local_id: '',
     has_audio: false, reverse_path: '', intensifies_path: '',
     reverse_intensifies_path: '', intensifies_audio_path: '', cartoon_path: '',
-    width: 1408, height: 768,
+    width: 1920, height: 1080,
     category_id: '', category_name: 'local',
-    material_id: '', material_name: `${sceneId}.png`, material_url: '',
+    material_id: '', material_name: imgName, material_url: '',
     crop: { upper_left_x: 0, upper_left_y: 0, upper_right_x: 1, upper_right_y: 0, lower_left_x: 0, lower_left_y: 1, lower_right_x: 1, lower_right_y: 1 },
     crop_ratio: 'free', audio_fade: null, crop_scale: 1, extra_type_option: 0,
     stable: { stable_level: 0, matrix_path: '', time_range: { start: 0, duration: 0 } },
@@ -532,7 +537,7 @@ function makeVideoMat(sceneId) {
 }
 
 sceneTimeline.forEach((scene, i) => {
-  const videoMat = makeVideoMat(scene.scene_id);
+  const videoMat = makeVideoMat(i);
   M.videos.push(videoMat);
 
   const aux      = makeVideoAuxRefs();
@@ -595,6 +600,13 @@ for (const [epStr, ep] of Object.entries(EP_MAP).sort()) {
 }
 
 console.log(`  이펙트: ${effectSegs3.length + effectSegs4.length}개 / 스티커: ${stickerSegs.length}개`);
+
+// ─── 페이드 material 헬퍼 ────────────────────────────────────────────────────
+function makeAudioFade(fadeInUs = 0, fadeOutUs = 0) {
+  const fadeId = newUUID();
+  M.audio_fades.push({ id: fadeId, type: 'audio_fade', fade_type: 0, fade_in_duration: fadeInUs, fade_out_duration: fadeOutUs });
+  return fadeId;
+}
 
 // ─── STEP 6: 오디오 트랙 빌드 ─────────────────────────────────────────────────
 console.log('\nSTEP 6: 오디오 트랙 빌드 중...');
@@ -665,30 +677,34 @@ pcClickPositions.forEach(pos => {
 });
 
 // ── 트랙7: BGM (각 사연 구간, 루핑) ──
-const bgmSegs = [];
-const BGM_MAT_DUR = REF.bgm.duration;
+const track7Segs = [];
+const BGM_SRC_DUR_US = REF.bgm.duration;
 
 for (const ep of Object.values(EP_MAP)) {
   if (!ep.story_start || !ep.story_end) continue;
-  let segStart  = ep.story_start;
-  let remaining = ep.story_end - ep.story_start;
-  let loopIdx   = 0;
 
-  while (remaining > 0) {
-    const clipDur = Math.min(remaining, BGM_MAT_DUR);
-    const isFirst = loopIdx === 0;
-    const fadeIn  = isFirst ? 1_833_333 : 299_999;
-    const fadeOut = remaining <= BGM_MAT_DUR ? (isFirst ? 233_333 : 966_666) : 0;
+  let cursor = ep.story_start;
+  const storyEnd = ep.story_end;
+
+  while (cursor < storyEnd) {
+    const remaining = storyEnd - cursor;
+    const segDur    = Math.min(remaining, BGM_SRC_DUR_US);
 
     const mat = makeSoundMat(REF.bgm, 'BGM', 'music');
-    const aux = makeAudioAuxRefs(fadeIn, fadeOut);
+    const aux = makeAudioAuxRefs();
     addAux(aux);
     M.audios.push(mat);
-    bgmSegs.push(makeAudioSegment({ materialId: mat.id, start: segStart, dur: clipDur, srcStart: 0, srcDur: clipDur, volume: BGM_VOL, extraRefs: aux.refs, trackRenderIndex: 7 }));
+    track7Segs.push(makeAudioSegment({ materialId: mat.id, start: cursor, dur: segDur, srcStart: 0, srcDur: segDur, volume: BGM_VOL, extraRefs: aux.refs, trackRenderIndex: 7 }));
 
-    segStart  += clipDur;
-    remaining -= clipDur;
-    loopIdx++;
+    cursor += segDur;
+  }
+}
+
+// 검증: source_timerange.duration이 BGM_SRC_DUR_US를 초과하지 않는지 확인
+for (const seg of track7Segs) {
+  if (seg.source_timerange.duration > BGM_SRC_DUR_US) {
+    console.error(`❌ BGM source_timerange 초과: ${seg.source_timerange.duration} > ${BGM_SRC_DUR_US}`);
+    process.exit(1);
   }
 }
 
@@ -729,7 +745,26 @@ orderedChunks.forEach((chunk, ti) => {
 });
 M.audios.push(...ttsMats);
 
-console.log(`  Radio noise: ${radioNoiseSegs.length}개 / PC click: ${pcClickSegs.length}개 / BGM: ${bgmSegs.length}개 / TTS: ${ttsSegs.length}개`);
+// Radio noise 페이드 적용 (fade_in 300ms / fade_out 300ms)
+for (const seg of radioNoiseSegs) {
+  const fadeId = makeAudioFade(300_000, 300_000);
+  if (!seg.extra_material_refs) seg.extra_material_refs = [];
+  seg.extra_material_refs.push(fadeId);
+}
+
+// BGM 페이드 적용 (첫 클립 fade_in 1s / 마지막 클립 fade_out 1s / 중간 없음)
+for (let i = 0; i < track7Segs.length; i++) {
+  const isFirst = i === 0;
+  const isLast  = i === track7Segs.length - 1;
+  const fadeId  = makeAudioFade(
+    isFirst ? 1_000_000 : 0,
+    isLast  ? 1_000_000 : 0
+  );
+  if (!track7Segs[i].extra_material_refs) track7Segs[i].extra_material_refs = [];
+  track7Segs[i].extra_material_refs.push(fadeId);
+}
+
+console.log(`  Radio noise: ${radioNoiseSegs.length}개 / PC click: ${pcClickSegs.length}개 / BGM: ${track7Segs.length}개 / TTS: ${ttsSegs.length}개`);
 
 // ─── STEP 7: 트랙 조립 ───────────────────────────────────────────────────────
 console.log('\nSTEP 7: 트랙 조립 중...');
@@ -751,7 +786,7 @@ const tracks = [
   makeTrack('effect',  [...effectSegs3, ...effectSegs4]),              // 3: 레트로 이펙트
   makeTrack('audio',   radioNoiseSegs),                                // 4: Radio noise
   makeTrack('audio',   pcClickSegs),                                   // 5: PC click
-  makeTrack('audio',   bgmSegs),                                       // 6: BGM
+  makeTrack('audio',   track7Segs),                                    // 6: BGM
   ...ttsSegs.map(seg => makeTrack('audio', [seg])),                    // 7~: TTS
 ];
 
@@ -784,11 +819,33 @@ function validate(draft) {
   if (draft.duration !== TOTAL_US)
     errors.push(`draft.duration 불일치: ${draft.duration} ≠ ${TOTAL_US}`);
 
+  // BGM source_timerange 초과 검증
+  const bgmAudioSegs = draft.tracks
+    .filter(t => t.type === 'audio')
+    .flatMap(t => t.segments)
+    .filter(s => s.source_timerange?.duration > REF.bgm.duration);
+  if (bgmAudioSegs.length > 0)
+    errors.push(`BGM source_timerange 초과 세그먼트 ${bgmAudioSegs.length}개`);
+
+  // 이미지 material 연결 검증
+  const videoSegsWithoutMat = videoSegs.filter(s => !s.material_id);
+  if (videoSegsWithoutMat.length > 0)
+    errors.push(`material_id 없는 비디오 세그먼트: ${videoSegsWithoutMat.length}개`);
+
   if (errors.length > 0) {
     console.error('\n❌ 검증 실패:');
     errors.forEach(e => console.error('   ' + e));
     process.exit(1);
   }
+
+  // audio_fades 등록 수 로깅
+  const fadedAudioSegs = draft.tracks
+    .filter(t => t.type === 'audio')
+    .flatMap(t => t.segments)
+    .filter(s => s.extra_material_refs?.some(r =>
+      draft.materials.audio_fades.some(f => f.id === r)
+    ));
+  console.log(`   오디오 페이드 적용: ${fadedAudioSegs.length}개 세그먼트`);
 }
 
 // ─── 출력 JSON 조립 ───────────────────────────────────────────────────────────

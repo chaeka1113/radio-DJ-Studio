@@ -72,7 +72,23 @@ try {
   process.exit(1);
 }
 
-// ── 3. 저장 ─────────────────────────────────────────────────────────
+// ── 3. sticker 추출 ──────────────────────────────────────────────────
+const stickers = master.materials?.stickers || [];
+const audiowave = stickers.find(s => s.name && s.name.includes('Audiowave'));
+if (!audiowave) {
+  console.warn('⚠️  Audiowave 스티커를 찾지 못했습니다. 수동 확인 필요.');
+} else {
+  result.audiowave_sticker = {
+    sticker_id:  audiowave.sticker_id,
+    resource_id: audiowave.resource_id,
+    name:        audiowave.name,
+    path:        audiowave.path,
+    category_id: audiowave.category_id,
+  };
+  console.log(`   audiowave   : ${audiowave.name}  id=${audiowave.sticker_id}`);
+}
+
+// ── 4. 저장 ─────────────────────────────────────────────────────────
 const outPath = path.join(__dirname, 'ref_capcut_materials.json');
 fs.writeFileSync(outPath, JSON.stringify(result, null, 2), 'utf-8');
 
@@ -81,7 +97,7 @@ console.log(`   radio_noise : ${result.radio_noise.durationSec.toFixed(3)}s  ...
 console.log(`   pc_click    : ${result.pc_click.durationSec.toFixed(3)}s  ...${result.pc_click.path.slice(-40)}`);
 console.log(`   bgm         : ${result.bgm.durationSec.toFixed(3)}s  ...${result.bgm.path.slice(-40)}`);
 
-// ── 4. gitignore 안내 ───────────────────────────────────────────────
+// ── 5. gitignore 안내 ───────────────────────────────────────────────
 console.log('');
 console.log('⚠️  ref_capcut_materials.json 은 이 PC의 CapCut 캐시 경로를 포함합니다.');
 console.log('   .gitignore 에 추가하세요:');
