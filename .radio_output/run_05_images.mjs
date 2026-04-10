@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import https from 'https';
 import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const API_KEY = process.env.GEMINI_API_KEY;
@@ -81,6 +82,36 @@ async function generateWithBackoff(prompt, negativePrompt, sceneId) {
   throw lastErr;
 }
 
+// ── FIX 2+3: ffmpeg 리사이즈 + ffprobe 검증 ─────────────────────────────────
+function resizeTo1920x1080(inputPath, outputPath) {
+  const tmpPath = outputPath + '.tmp.png';
+  execSync(
+    `ffmpeg -y -i "${inputPath}" -vf "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080" -update 1 "${tmpPath}"`,
+    { stdio: 'pipe' }
+  );
+  fs.renameSync(tmpPath, outputPath);
+}
+
+function verifySize(filePath) {
+  const result = JSON.parse(
+    execSync(
+      `ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of json "${filePath}"`,
+      { stdio: ['pipe', 'pipe', 'pipe'] }
+    ).toString()
+  );
+  return result.streams?.[0] ?? { width: 0, height: 0 };
+}
+
+function ensureSize(filePath) {
+  const { width, height } = verifySize(filePath);
+  if (width !== 1920 || height !== 1080) {
+    console.warn(`   ⚠️  크기 불일치: ${width}×${height} → 강제 리사이즈 적용`);
+    resizeTo1920x1080(filePath, filePath);
+    const after = verifySize(filePath);
+    console.log(`   ✅ 리사이즈 완료: ${after.width}×${after.height}`);
+  }
+}
+
 const results = [];
 let success = 0, fail = 0;
 
@@ -105,6 +136,8 @@ for (let i = 0; i < scenes.length; i++) {
   try {
     const b64 = await generateWithBackoff(prompt, negPrompt, scene.scene_id);
     fs.writeFileSync(filePath, Buffer.from(b64, 'base64'));
+    resizeTo1920x1080(filePath, filePath);
+    ensureSize(filePath);
     process.stdout.write(`✅\n`);
     results.push({ scene_id: scene.scene_id, status: 'success', file: filePath });
     success++;

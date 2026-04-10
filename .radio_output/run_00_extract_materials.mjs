@@ -59,7 +59,7 @@ try {
     _masterFile: path.basename(masterPath),
     radio_noise: findAudio(audios, 33.07),   // ~33s 씬 전환용 노이즈
     pc_click:    findAudio(audios,  1.77),   // ~1.8s 클릭음
-    bgm:         findAudio(audios, 122.2),   // ~122s 배경음악 (vol=0.05)
+    bgm:         findAudio(audios, 210.2),   // ~210s 배경음악 (vol=0.05)
   };
 } catch (err) {
   console.error(`❌ ${err.message}`);

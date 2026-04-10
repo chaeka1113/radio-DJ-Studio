@@ -17,8 +17,10 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
+import { config as loadEnv } from 'dotenv';
 
 const __dirname  = path.dirname(fileURLToPath(import.meta.url));
+loadEnv({ path: path.join(__dirname, '..', '.env') });
 const newUUID    = () => randomUUID().toUpperCase();
 const toUs       = (sec) => Math.round(sec * 1_000_000);
 const normPath   = (p) => (p || '').replace(/\\/g, '/');
@@ -130,43 +132,96 @@ for (const fname of tsFiles) {
 const orderedChunks = Object.values(chunks).sort((a, b) => a.idx - b.idx);
 console.log(`  ${orderedChunks.length}개 chunk: ${orderedChunks.map(c => c.chunkId).join(', ')}`);
 
-// ─── STEP 2: anchor 계산 ──────────────────────────────────────────────────────
-console.log('\nSTEP 2: anchor 계산 중...');
+// ─── STEP 2: 타임라인 블록 조립 (SKILL 규칙 준수) ────────────────────────────
+console.log('\nSTEP 2: 타임라인 블록 조립 중...');
 
-const PC_CLICK_US = toUs(REF.pc_click.durationSec);
+const NOISE_CLIP_US = 2_000_000;                         // radio noise 클립 재생 길이 2.0s
+const LEAD_DUR      = Math.max(TAPE_DUR, NOISE_CLIP_US); // radio+tape 완료까지 대기 (2.0s)
 
-const anchors = {};
+// chunk 역할 분류
+const openingChunk = orderedChunks.find(c => c.type === 'opening');
+const closingChunk = orderedChunks.find(c => c.type === 'qa_and_closing');
+const epChunksMap  = {};
+for (const c of orderedChunks) {
+  if (c.ep) {
+    if (!epChunksMap[c.ep]) epChunksMap[c.ep] = {};
+    epChunksMap[c.ep][c.type] = c;
+  }
+}
+const epNums = Object.keys(epChunksMap).map(Number).sort((a, b) => a - b);
+
+// 타임라인 블록: {type, ep?, chunk, sceneStart, sceneEnd, ttsStart, ttsEnd, leadDur}
+const timelineBlocks = [];
 let cursor = 0;
 
-for (const chunk of orderedChunks) {
-  let segStart;
-  const durUs = chunk.durUs;
-
-  if (chunk.type === 'opening') {
-    segStart = 0;
-  } else if (chunk.type === 'story' && chunk.ep === 1) {
-    segStart = cursor + PC_CLICK_US;
-  } else if (chunk.type === 'dj') {
-    segStart = cursor + 10_000_000;
-  } else if (chunk.type === 'story' && chunk.ep > 1) {
-    segStart = cursor + PC_CLICK_US;
-  } else {
-    segStart = cursor; // qa_and_closing 등
-  }
-
-  anchors[chunk.chunkId] = { start: segStart, end: segStart + durUs, durUs };
-  cursor = segStart + durUs;
+// SEGMENT A: Opening
+if (openingChunk) {
+  const sceneStart = cursor;
+  const ttsStart   = cursor + LEAD_DUR;
+  const ttsEnd     = ttsStart + openingChunk.durUs;
+  timelineBlocks.push({ type: 'opening', chunk: openingChunk, sceneStart, sceneEnd: ttsEnd, ttsStart, ttsEnd, leadDur: LEAD_DUR });
+  cursor = ttsEnd;
 }
 
-const TOTAL_US = cursor;
+// SEGMENTS B + C: 각 EP (story → dj bridge)
+for (const ep of epNums) {
+  const storyChunk = epChunksMap[ep]?.story;
+  const djChunk    = epChunksMap[ep]?.dj;
 
-// EP별 앵커 맵
-const EP_MAP = {};
-for (const chunk of orderedChunks) {
-  if (!chunk.ep) continue;
-  if (!EP_MAP[chunk.ep]) EP_MAP[chunk.ep] = {};
-  EP_MAP[chunk.ep][chunk.type + '_start'] = anchors[chunk.chunkId].start;
-  EP_MAP[chunk.ep][chunk.type + '_end']   = anchors[chunk.chunkId].end;
+  // SEGMENT B: Story (White In → Story TTS)
+  if (storyChunk) {
+    const sceneStart = cursor;
+    const ttsStart   = cursor + WHITE_IN_DUR;
+    const ttsEnd     = ttsStart + storyChunk.durUs;
+    timelineBlocks.push({ type: 'story', ep, chunk: storyChunk, sceneStart, sceneEnd: ttsEnd, ttsStart, ttsEnd, leadDur: WHITE_IN_DUR });
+    cursor = ttsEnd;
+  }
+
+  // SEGMENT C: DJ bridge (Radio+Tape → DJ TTS)
+  if (djChunk) {
+    const sceneStart = cursor;
+    const ttsStart   = cursor + LEAD_DUR;
+    const ttsEnd     = ttsStart + djChunk.durUs;
+    timelineBlocks.push({ type: 'dj', ep, chunk: djChunk, sceneStart, sceneEnd: ttsEnd, ttsStart, ttsEnd, leadDur: LEAD_DUR });
+    cursor = ttsEnd;
+  }
+}
+
+// SEGMENT D: Closing TTS (이미지 없음 — 검은 화면 상태)
+if (closingChunk) {
+  const ttsStart = cursor;
+  const ttsEnd   = ttsStart + closingChunk.durUs;
+  timelineBlocks.push({ type: 'closing', chunk: closingChunk, sceneStart: null, sceneEnd: null, ttsStart, ttsEnd, leadDur: 0 });
+  cursor = ttsEnd;
+}
+
+// Noise Out 시작 = 모든 콘텐츠 완전 종료 직후 (검은 화면 아웃트로)
+const noiseOutStart = cursor;
+const TOTAL_US      = noiseOutStart + NOISE_OUT_DUR;
+
+// 하위 호환 앵커 / EP_MAP
+const anchors = {};
+const EP_MAP  = {};
+for (const block of timelineBlocks) {
+  anchors[block.chunk.chunkId] = { start: block.ttsStart, end: block.ttsEnd, durUs: block.chunk.durUs };
+  if (block.ep) {
+    if (!EP_MAP[block.ep]) EP_MAP[block.ep] = {};
+    if (block.type === 'story') {
+      EP_MAP[block.ep].story_start       = block.ttsStart;
+      EP_MAP[block.ep].story_end         = block.ttsEnd;
+      EP_MAP[block.ep].story_scene_start = block.sceneStart;
+    } else if (block.type === 'dj') {
+      EP_MAP[block.ep].dj_start = block.ttsStart;
+      EP_MAP[block.ep].dj_end   = block.ttsEnd;
+    }
+  }
+}
+
+console.log(`  총 타임라인: ${(TOTAL_US/1e6).toFixed(2)}s  (Noise Out: ${(noiseOutStart/1e6).toFixed(2)}s)`);
+for (const b of timelineBlocks) {
+  const tag = b.type === 'story' ? `EP${b.ep} story` : b.type === 'dj' ? `EP${b.ep} dj  ` : b.type + '     ';
+  const sc  = b.sceneStart !== null ? `${(b.sceneStart/1e6).toFixed(2)}s` : '  -  ';
+  console.log(`  [${tag}] scene:${sc} tts:${(b.ttsStart/1e6).toFixed(2)}s~${(b.ttsEnd/1e6).toFixed(2)}s`);
 }
 
 // ─── STEP 3: 씬 timeline (sentence boundary 기반 duration) ───────────────────
@@ -213,16 +268,20 @@ function calcSceneDurations(chunkId, sceneCount) {
   return durs;
 }
 
-// 스토리보드 씬을 그룹화 (episode_id 기준)
+// 스토리보드 씬을 그룹화 (episode_id 기준, 기존 로직 유지)
 const storyboard = JSON.parse(fs.readFileSync(sbPath, 'utf-8'));
 const sbScenes   = storyboard.scenes;
 
 const sceneGroups = [];
 let cg = null;
+let djIdx = 0;
+let prevIsDJ = false;
 for (const s of sbScenes) {
   const isDJ  = s.type === 'DJ_SHOT';
+  if (isDJ && !prevIsDJ) djIdx++;
   const epKey = isDJ ? null : (s.episode_id || null);
-  const gKey  = isDJ ? 'dj_' + sceneGroups.length : 'ep' + epKey;
+  const gKey  = isDJ ? 'dj_' + djIdx : 'ep' + epKey;
+  prevIsDJ = isDJ;
   if (!cg || cg._key !== gKey) {
     if (cg) sceneGroups.push(cg);
     cg = { _key: gKey, isDJ, scenes: [s] };
@@ -232,21 +291,24 @@ for (const s of sbScenes) {
 }
 if (cg) sceneGroups.push(cg);
 
-// 씬 그룹을 chunk에 매핑 (07_qa_and_closing은 씬 없음)
-const videoChunks = orderedChunks.filter(c => c.type !== 'qa_and_closing');
-if (videoChunks.length !== sceneGroups.length) {
-  console.warn(`  ⚠  videoChunks(${videoChunks.length}) ≠ sceneGroups(${sceneGroups.length})`);
+// 씬이 있는 블록 (closing 제외) → sceneGroups와 1:1 매핑
+const sceneBlocks = timelineBlocks.filter(b => b.sceneStart !== null);
+if (sceneBlocks.length !== sceneGroups.length) {
+  console.warn(`  ⚠  sceneBlocks(${sceneBlocks.length}) ≠ sceneGroups(${sceneGroups.length})`);
 }
 
+// sceneTimeline: 리드인(LEAD_DUR / WHITE_IN_DUR)을 첫 씬에 흡수하여 배분
 const sceneTimeline = [];
 sceneGroups.forEach((group, gi) => {
-  const chunk      = videoChunks[gi];
-  const anchorSt   = anchors[chunk.chunkId].start;
-  const sceneDurs  = calcSceneDurations(chunk.chunkId, group.scenes.length);
-  let pos = anchorSt;
+  const block    = sceneBlocks[gi];
+  const baseDurs = calcSceneDurations(block.chunk.chunkId, group.scenes.length);
+  // 첫 씬에 리드인 시간 추가 → 씬 총 합 == sceneEnd - sceneStart
+  if (baseDurs.length > 0) baseDurs[0] += block.leadDur;
+
+  let pos = block.sceneStart;
   group.scenes.forEach((scene, si) => {
-    const dur = sceneDurs[si];
-    sceneTimeline.push({ ...scene, _chunk: chunk.chunkId, _start: pos, _dur: dur, _end: pos + dur });
+    const dur = baseDurs[si];
+    sceneTimeline.push({ ...scene, _chunk: block.chunk.chunkId, _start: pos, _dur: dur, _end: pos + dur });
     pos += dur;
   });
 });
@@ -567,37 +629,57 @@ sceneTimeline.forEach((scene, i) => {
 M.transitions.push(...transitionMats);
 console.log(`  비디오 세그먼트: ${videoSegments.length}개 / B 페이드: ${transitionMats.length}개`);
 
-// ─── STEP 5: 이펙트 + 스티커 빌드 (EP_MAP 기준) ───────────────────────────────
+// ─── STEP 5: 이펙트 + 스티커 빌드 (SKILL 규칙 준수) ──────────────────────────
 console.log('\nSTEP 5: 이펙트 + 스티커 빌드 중...');
 
-const effectSegs3 = [];  // 블랙노이즈 / 노이즈아웃 / 화이트인
-const effectSegs4 = [];  // 80년대 테이프
+const effectSegs3 = [];  // Black Noise / Noise Out / White In
+const effectSegs4 = [];  // 80s Tape
 const stickerSegs = [];
 
-const openingEnd = anchors['00_opening']?.end ?? 0;
+for (const block of timelineBlocks) {
+  if (block.type === 'opening' || block.type === 'dj') {
+    // 1. TAPE_80S: sceneStart에서 시작, TAPE_DUR만큼 (Radio noise와 동시 재생)
+    effectSegs4.push(makeEffectSegment({
+      materialId: T_VE.TAPE_80S.id,
+      start: block.sceneStart,
+      dur: TAPE_DUR,
+      trackRenderIndex: 11005,
+    }));
 
-// 오프닝 구간 스티커 + TAPE_80S
-const opStkAux = makeStickerAuxRefs(); addAux(opStkAux);
-stickerSegs.push(makeStickerSegment({ materialId: T_STICKER.id, start: 0, dur: openingEnd, extraRefs: opStkAux.refs }));
-effectSegs4.push(makeEffectSegment({ materialId: T_VE.TAPE_80S.id, start: 0, dur: PC_CLICK_US + 200_000, trackRenderIndex: 11005 }));
+    // 2. Black Noise + WAVE 스티커: 정확히 DJ TTS 시작~종료 구간에만
+    effectSegs3.push(makeEffectSegment({
+      materialId: T_VE.BLACK_NOISE.id,
+      start: block.ttsStart,
+      dur: block.chunk.durUs,
+      trackRenderIndex: 11006,
+    }));
+    const stkAux = makeStickerAuxRefs(); addAux(stkAux);
+    stickerSegs.push(makeStickerSegment({
+      materialId: T_STICKER.id,
+      start: block.ttsStart,
+      dur: block.chunk.durUs,
+      extraRefs: stkAux.refs,
+    }));
+  }
 
-// 각 EP 경계: story_end - 10s 기준
-for (const [epStr, ep] of Object.entries(EP_MAP).sort()) {
-  if (!ep.story_end) continue;
-
-  const blackStart = ep.story_end - 10_000_000;
-  const blackEnd   = ep.story_end;
-  const noiseEnd   = blackEnd   + NOISE_OUT_DUR;
-  const whiteEnd   = noiseEnd   + WHITE_IN_DUR;
-
-  effectSegs3.push(makeEffectSegment({ materialId: T_VE.BLACK_NOISE.id, start: blackStart, dur: 10_000_000,  trackRenderIndex: 11006 }));
-  effectSegs3.push(makeEffectSegment({ materialId: T_VE.NOISE_OUT.id,   start: blackEnd,   dur: NOISE_OUT_DUR, trackRenderIndex: 11006 }));
-  effectSegs3.push(makeEffectSegment({ materialId: T_VE.WHITE_IN.id,    start: noiseEnd,   dur: WHITE_IN_DUR,  trackRenderIndex: 11006 }));
-  effectSegs4.push(makeEffectSegment({ materialId: T_VE.TAPE_80S.id,    start: blackStart, dur: TAPE_DUR,      trackRenderIndex: 11005 }));
-
-  const stkAux = makeStickerAuxRefs(); addAux(stkAux);
-  stickerSegs.push(makeStickerSegment({ materialId: T_STICKER.id, start: blackStart, dur: 10_000_000, extraRefs: stkAux.refs }));
+  if (block.type === 'story') {
+    // White In: sceneStart에 즉시 배치, WHITE_IN_DUR 동안
+    effectSegs3.push(makeEffectSegment({
+      materialId: T_VE.WHITE_IN.id,
+      start: block.sceneStart,
+      dur: WHITE_IN_DUR,
+      trackRenderIndex: 11006,
+    }));
+  }
 }
+
+// SEGMENT D: Noise Out — 모든 콘텐츠 종료 후 검은 화면에서 단독 재생
+effectSegs3.push(makeEffectSegment({
+  materialId: T_VE.NOISE_OUT.id,
+  start: noiseOutStart,
+  dur: NOISE_OUT_DUR,
+  trackRenderIndex: 11006,
+}));
 
 console.log(`  이펙트: ${effectSegs3.length + effectSegs4.length}개 / 스티커: ${stickerSegs.length}개`);
 
@@ -608,7 +690,7 @@ function makeAudioFade(fadeInUs = 0, fadeOutUs = 0) {
   return fadeId;
 }
 
-// ─── STEP 6: 오디오 트랙 빌드 ─────────────────────────────────────────────────
+// ─── STEP 6: 오디오 트랙 빌드 (SKILL 규칙 준수) ────────────────────────────────
 console.log('\nSTEP 6: 오디오 트랙 빌드 중...');
 
 // 공통 오디오 material 팩토리
@@ -638,69 +720,53 @@ function makeSoundMat(refMat, name, type = 'sound') {
   };
 }
 
-// ── 트랙5: Radio noise (DJ 씬 경계 앞뒤 2s) ──
+// ── Radio noise: 각 오프닝/DJ 리드인 sceneStart 시점에 NOISE_CLIP_US(2s) ──
+// SEGMENT A: cursor=0에, SEGMENT C: story_end 직후에 배치
 const radioNoiseSegs = [];
-const NOISE_CLIP_US  = 2_000_000;
-
-sceneTimeline.filter(s => s.type === 'DJ_SHOT').forEach(ds => {
-  const matIn  = makeSoundMat(REF.radio_noise, 'Radio noise');
-  const auxIn  = makeAudioAuxRefs();
-  addAux(auxIn);
-  M.audios.push(matIn);
-  const inDur = Math.min(NOISE_CLIP_US, ds._dur);
-  radioNoiseSegs.push(makeAudioSegment({ materialId: matIn.id, start: ds._start, dur: inDur, srcStart: 0, srcDur: inDur, volume: 1, extraRefs: auxIn.refs, trackRenderIndex: 5 }));
-
-  if (ds._dur > NOISE_CLIP_US * 2) {
-    const matOut = makeSoundMat(REF.radio_noise, 'Radio noise');
-    const auxOut = makeAudioAuxRefs();
-    addAux(auxOut);
-    M.audios.push(matOut);
-    const outStart = ds._end - NOISE_CLIP_US;
-    radioNoiseSegs.push(makeAudioSegment({ materialId: matOut.id, start: outStart, dur: NOISE_CLIP_US, srcStart: 0, srcDur: NOISE_CLIP_US, volume: 1, extraRefs: auxOut.refs, trackRenderIndex: 5 }));
-  }
-});
-
-// ── 트랙6: PC click (오프닝 끝 + 각 DJ 끝 직후) ──
-const pcClickSegs = [];
-
-const pcClickPositions = [openingEnd];
-for (const ep of Object.values(EP_MAP)) {
-  if (ep.dj_end) pcClickPositions.push(ep.dj_end);
-}
-
-pcClickPositions.forEach(pos => {
-  const mat = makeSoundMat(REF.pc_click, 'PC click');
+for (const block of timelineBlocks.filter(b => b.type === 'opening' || b.type === 'dj')) {
+  const mat = makeSoundMat(REF.radio_noise, 'Radio noise');
   const aux = makeAudioAuxRefs();
   addAux(aux);
   M.audios.push(mat);
-  pcClickSegs.push(makeAudioSegment({ materialId: mat.id, start: pos, dur: PC_CLICK_US, srcStart: 0, srcDur: PC_CLICK_US, volume: 1, extraRefs: aux.refs, trackRenderIndex: 6 }));
-});
+  radioNoiseSegs.push(makeAudioSegment({
+    materialId: mat.id,
+    start: block.sceneStart, dur: NOISE_CLIP_US,
+    srcStart: 0, srcDur: NOISE_CLIP_US,
+    volume: 1, extraRefs: aux.refs, trackRenderIndex: 5,
+  }));
+}
 
-// ── 트랙7: BGM (각 사연 구간, 루핑) ──
+// PC click 트랙 (빈 배열로 유지 — 트랙 구조 호환)
+const pcClickSegs = [];
+
+// ── BGM: 각 사연 구간 — White In 시작 ~ Story TTS 종료, 루핑 ──
+// SEGMENT B: bgmStart = sceneStart (White In 시작점), bgmEnd = ttsEnd
 const track7Segs = [];
 const BGM_SRC_DUR_US = REF.bgm.duration;
 
-for (const ep of Object.values(EP_MAP)) {
-  if (!ep.story_start || !ep.story_end) continue;
+for (const block of timelineBlocks.filter(b => b.type === 'story')) {
+  const bgmStart = block.sceneStart;  // White In 시작점
+  const bgmEnd   = block.ttsEnd;      // Story TTS 종료점
 
-  let cursor = ep.story_start;
-  const storyEnd = ep.story_end;
-
-  while (cursor < storyEnd) {
-    const remaining = storyEnd - cursor;
+  let cur = bgmStart;
+  while (cur < bgmEnd) {
+    const remaining = bgmEnd - cur;
     const segDur    = Math.min(remaining, BGM_SRC_DUR_US);
-
     const mat = makeSoundMat(REF.bgm, 'BGM', 'music');
     const aux = makeAudioAuxRefs();
     addAux(aux);
     M.audios.push(mat);
-    track7Segs.push(makeAudioSegment({ materialId: mat.id, start: cursor, dur: segDur, srcStart: 0, srcDur: segDur, volume: BGM_VOL, extraRefs: aux.refs, trackRenderIndex: 7 }));
-
-    cursor += segDur;
+    track7Segs.push(makeAudioSegment({
+      materialId: mat.id,
+      start: cur, dur: segDur,
+      srcStart: 0, srcDur: segDur,
+      volume: BGM_VOL, extraRefs: aux.refs, trackRenderIndex: 7,
+    }));
+    cur += segDur;
   }
 }
 
-// 검증: source_timerange.duration이 BGM_SRC_DUR_US를 초과하지 않는지 확인
+// BGM source_timerange 초과 검증
 for (const seg of track7Segs) {
   if (seg.source_timerange.duration > BGM_SRC_DUR_US) {
     console.error(`❌ BGM source_timerange 초과: ${seg.source_timerange.duration} > ${BGM_SRC_DUR_US}`);
@@ -708,13 +774,13 @@ for (const seg of track7Segs) {
   }
 }
 
-// ── 트랙8~: TTS (각 chunk 앵커 기준) ──
-const ttsSegs  = [];
-const ttsMats  = [];
+// ── TTS: 각 block의 ttsStart 기준 배치 ──
+const ttsSegs = [];
+const ttsMats = [];
 
-orderedChunks.forEach((chunk, ti) => {
-  const anchor = anchors[chunk.chunkId];
-  const filePath = normPath(chunk.mp3Path);
+timelineBlocks.forEach((block, ti) => {
+  const { chunk } = block;
+  const filePath  = normPath(chunk.mp3Path);
   const mat = {
     id: newUUID(), unique_id: '', type: 'extract_music',
     name: path.basename(chunk.mp3Path), duration: chunk.durUs,
@@ -740,31 +806,33 @@ orderedChunks.forEach((chunk, ti) => {
   const aux = makeAudioAuxRefs();
   addAux(aux);
   ttsMats.push(mat);
-  ttsSegs.push(makeAudioSegment({ materialId: mat.id, start: anchor.start, dur: chunk.durUs, srcStart: 0, srcDur: chunk.durUs, volume: TTS_VOL, extraRefs: aux.refs, trackRenderIndex: 8 + ti }));
-  console.log(`  TTS [${ti+1}/${orderedChunks.length}] ${chunk.chunkId}: t=${(anchor.start/1e6).toFixed(2)}s dur=${chunk.durSec.toFixed(2)}s`);
+  ttsSegs.push(makeAudioSegment({
+    materialId: mat.id,
+    start: block.ttsStart, dur: chunk.durUs,
+    srcStart: 0, srcDur: chunk.durUs,
+    volume: TTS_VOL, extraRefs: aux.refs, trackRenderIndex: 8 + ti,
+  }));
+  console.log(`  TTS [${ti+1}/${timelineBlocks.length}] ${chunk.chunkId}: t=${(block.ttsStart/1e6).toFixed(2)}s dur=${chunk.durSec.toFixed(2)}s`);
 });
 M.audios.push(...ttsMats);
 
-// Radio noise 페이드 적용 (fade_in 300ms / fade_out 300ms)
+// Radio noise 페이드 (in 300ms / out 300ms)
 for (const seg of radioNoiseSegs) {
   const fadeId = makeAudioFade(300_000, 300_000);
   if (!seg.extra_material_refs) seg.extra_material_refs = [];
   seg.extra_material_refs.push(fadeId);
 }
 
-// BGM 페이드 적용 (첫 클립 fade_in 1s / 마지막 클립 fade_out 1s / 중간 없음)
+// BGM 페이드 (첫 클립 fade_in 1s / 마지막 클립 fade_out 1s)
 for (let i = 0; i < track7Segs.length; i++) {
   const isFirst = i === 0;
   const isLast  = i === track7Segs.length - 1;
-  const fadeId  = makeAudioFade(
-    isFirst ? 1_000_000 : 0,
-    isLast  ? 1_000_000 : 0
-  );
+  const fadeId  = makeAudioFade(isFirst ? 1_000_000 : 0, isLast ? 1_000_000 : 0);
   if (!track7Segs[i].extra_material_refs) track7Segs[i].extra_material_refs = [];
   track7Segs[i].extra_material_refs.push(fadeId);
 }
 
-console.log(`  Radio noise: ${radioNoiseSegs.length}개 / PC click: ${pcClickSegs.length}개 / BGM: ${track7Segs.length}개 / TTS: ${ttsSegs.length}개`);
+console.log(`  Radio noise: ${radioNoiseSegs.length}개 / BGM: ${track7Segs.length}개 / TTS: ${ttsSegs.length}개`);
 
 // ─── STEP 7: 트랙 조립 ───────────────────────────────────────────────────────
 console.log('\nSTEP 7: 트랙 조립 중...');
@@ -819,13 +887,10 @@ function validate(draft) {
   if (draft.duration !== TOTAL_US)
     errors.push(`draft.duration 불일치: ${draft.duration} ≠ ${TOTAL_US}`);
 
-  // BGM source_timerange 초과 검증
-  const bgmAudioSegs = draft.tracks
-    .filter(t => t.type === 'audio')
-    .flatMap(t => t.segments)
-    .filter(s => s.source_timerange?.duration > REF.bgm.duration);
-  if (bgmAudioSegs.length > 0)
-    errors.push(`BGM source_timerange 초과 세그먼트 ${bgmAudioSegs.length}개`);
+  // BGM source_timerange 초과 검증 (BGM 트랙 세그먼트만 대상)
+  const bgmOver = track7Segs.filter(s => s.source_timerange?.duration > BGM_SRC_DUR_US);
+  if (bgmOver.length > 0)
+    errors.push(`BGM source_timerange 초과 세그먼트 ${bgmOver.length}개`);
 
   // 이미지 material 연결 검증
   const videoSegsWithoutMat = videoSegs.filter(s => !s.material_id);
@@ -898,12 +963,154 @@ const newDraft = {
   materials, tracks,
 };
 
-// 검증
+// ─── QA 검증 (SKILL 5대 편집 규칙 자동 검증) ────────────────────────────────
+function validateTimeline(draft) {
+  const errors = [];
+  const allEffectSegs  = draft.tracks.filter(t => t.type === 'effect').flatMap(t => t.segments);
+  const allStickerSegs = draft.tracks.filter(t => t.type === 'sticker').flatMap(t => t.segments);
+
+  // effect_id 역매핑 (material_id → effect_id)
+  const veMap = {};
+  for (const ve of draft.materials.video_effects) veMap[ve.id] = ve.effect_id;
+  const BLACK_NOISE_EFFECT_ID = '7399470796290166022';
+
+  // QA 1: Radio noise 종료 <= DJ TTS 시작 (겹침 금지)
+  for (const block of timelineBlocks.filter(b => b.type === 'opening' || b.type === 'dj')) {
+    const radioEnd   = block.sceneStart + NOISE_CLIP_US;
+    const djTtsStart = block.ttsStart;
+    if (radioEnd > djTtsStart)
+      errors.push(`QA1 [Overlap] ${block.chunk.chunkId}: radio_noise 종료(${(radioEnd/1e6).toFixed(3)}s) > DJ TTS 시작(${(djTtsStart/1e6).toFixed(3)}s)`);
+  }
+
+  // QA 2: EP 사연 씬 총 duration == (WHITE_IN_DUR + story_tts_dur) ±1ms
+  for (const block of timelineBlocks.filter(b => b.type === 'story')) {
+    const storyScenes = sceneTimeline.filter(s => s._chunk === block.chunk.chunkId);
+    const totalImgDur = storyScenes.reduce((sum, s) => sum + s._dur, 0);
+    const expected    = block.sceneEnd - block.sceneStart;
+    if (Math.abs(totalImgDur - expected) > 1000)
+      errors.push(`QA2 [Duration] EP${block.ep} story: 이미지 총 dur ${totalImgDur}µs ≠ 예상 ${expected}µs (delta ${totalImgDur - expected}µs)`);
+  }
+
+  // QA 3: WAVE 스티커 + Black Noise == 정확히 DJ TTS 구간
+  for (const block of timelineBlocks.filter(b => b.type === 'opening' || b.type === 'dj')) {
+    const djStart = block.ttsStart;
+    const djDur   = block.chunk.durUs;
+
+    const matchBN = allEffectSegs.find(s =>
+      veMap[s.material_id] === BLACK_NOISE_EFFECT_ID &&
+      s.target_timerange.start === djStart &&
+      s.target_timerange.duration === djDur
+    );
+    if (!matchBN)
+      errors.push(`QA3 [Sync] ${block.chunk.chunkId}: Black Noise가 DJ TTS 구간(${(djStart/1e6).toFixed(2)}s, ${(djDur/1e6).toFixed(2)}s)과 불일치`);
+
+    const matchStk = allStickerSegs.find(s =>
+      s.target_timerange.start === djStart &&
+      s.target_timerange.duration === djDur
+    );
+    if (!matchStk)
+      errors.push(`QA3 [Sync] ${block.chunk.chunkId}: WAVE 스티커가 DJ TTS 구간(${(djStart/1e6).toFixed(2)}s)과 불일치`);
+  }
+
+  // QA 4: White In 종료 == Story TTS 시작 (1µs 허용)
+  for (const block of timelineBlocks.filter(b => b.type === 'story')) {
+    const whiteInEnd = block.sceneStart + WHITE_IN_DUR;
+    if (Math.abs(whiteInEnd - block.ttsStart) > 1)
+      errors.push(`QA4 [Sync] EP${block.ep}: White In 종료(${(whiteInEnd/1e6).toFixed(3)}s) ≠ Story TTS 시작(${(block.ttsStart/1e6).toFixed(3)}s)`);
+  }
+
+  // QA 5: Noise Out 시작 == max(마지막 이미지 종료, 마지막 TTS 종료) — 의도된 암전 아웃트로
+  const lastImgEnd  = sceneTimeline.length ? sceneTimeline[sceneTimeline.length - 1]._end : 0;
+  const lastTtsEnd  = timelineBlocks[timelineBlocks.length - 1].ttsEnd;
+  const expectedNOS = Math.max(lastImgEnd, lastTtsEnd);
+  if (noiseOutStart !== expectedNOS)
+    errors.push(`QA5 [Outro] Noise Out 시작(${(noiseOutStart/1e6).toFixed(3)}s) ≠ 예상(${(expectedNOS/1e6).toFixed(3)}s)`);
+
+  // QA 6: 사연 BGM start <= White In start AND BGM end >= Story TTS end
+  for (const block of timelineBlocks.filter(b => b.type === 'story')) {
+    const bgmForBlock = track7Segs.filter(s =>
+      s.target_timerange.start >= block.sceneStart &&
+      s.target_timerange.start < block.ttsEnd
+    );
+    if (bgmForBlock.length === 0) {
+      errors.push(`QA6 [BGM] EP${block.ep}: BGM 세그먼트 없음`);
+      continue;
+    }
+    const bgmStart = Math.min(...bgmForBlock.map(s => s.target_timerange.start));
+    const bgmEnd   = Math.max(...bgmForBlock.map(s => s.target_timerange.start + s.target_timerange.duration));
+    if (bgmStart > block.sceneStart)
+      errors.push(`QA6 [BGM] EP${block.ep}: BGM 시작(${(bgmStart/1e6).toFixed(2)}s) > White In 시작(${(block.sceneStart/1e6).toFixed(2)}s)`);
+    if (bgmEnd < block.ttsEnd)
+      errors.push(`QA6 [BGM] EP${block.ep}: BGM 종료(${(bgmEnd/1e6).toFixed(2)}s) < Story TTS 종료(${(block.ttsEnd/1e6).toFixed(2)}s)`);
+  }
+
+  if (errors.length > 0) {
+    errors.forEach(e => console.error('❌ QA FAIL:', e));
+    process.exit(1);
+  }
+  console.log('✅ QA ALL PASSED: 모든 5대 편집 규칙 및 아웃트로 연출 완벽 적용 완료.');
+}
+
+// 검증 (QA 타임라인 → 기존 구조 검증 순)
+validateTimeline(newDraft);
 validate(newDraft);
 
-// ─── 저장 ─────────────────────────────────────────────────────────────────────
+// ─── 저장 (기존: capcut_output/) ─────────────────────────────────────────────
 fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 fs.writeFileSync(OUTPUT_PATH, JSON.stringify(newDraft, null, 2), 'utf-8');
+
+// ─── 라우팅: CapCut 드래프트 폴더로 직접 배송 ────────────────────────────────
+{
+  const DRAFTS_DIR = process.env.CAPCUT_DRAFTS_DIR;
+  if (!DRAFTS_DIR || !fs.existsSync(DRAFTS_DIR)) {
+    console.error('❌ CAPCUT_DRAFTS_DIR가 .env에 없거나 경로가 유효하지 않습니다.');
+    process.exit(1);
+  }
+
+  // 1. 타겟 폴더명 생성 (Radio_EP_YYYYMMDD_HHMMSS)
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const stamp = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const folderName = `Radio_EP_${stamp}`;
+  const targetDir  = path.join(DRAFTS_DIR, folderName);
+  fs.mkdirSync(targetDir, { recursive: true });
+
+  // 2. 껍데기(meta_info) 로드
+  const metaTemplatePath = path.join(__dirname, 'master_template', 'draft_meta_info.json');
+  if (!fs.existsSync(metaTemplatePath)) {
+    console.error('❌ master_template/draft_meta_info.json 없음');
+    console.error('   먼저 실행: node .radio_output/run_00_extract_meta.mjs');
+    process.exit(1);
+  }
+  const metaInfo = JSON.parse(fs.readFileSync(metaTemplatePath, 'utf-8'));
+
+  // 3. Root UUID 발급
+  const rootUUID = newUUID();
+
+  // 4. 껍데기 갱신
+  metaInfo.id             = rootUUID;
+  metaInfo.draft_name     = folderName;
+  metaInfo.draft_fold_path = normPath(targetDir);
+
+  // 5. 알맹이 동기화 (newDraft.id에 동일 UUID 주입)
+  newDraft.id = rootUUID;
+
+  // 6. 최종 배송
+  fs.writeFileSync(
+    path.join(targetDir, 'draft_meta_info.json'),
+    JSON.stringify(metaInfo, null, 2),
+    'utf-8'
+  );
+  fs.writeFileSync(
+    path.join(targetDir, 'draft_content.json'),
+    JSON.stringify(newDraft, null, 2),
+    'utf-8'
+  );
+
+  console.log(`\n🚀 CapCut 드래프트 배송 완료`);
+  console.log(`   폴더: ${normPath(targetDir)}`);
+  console.log(`   UUID: ${rootUUID}`);
+}
 
 // ─── テンキ爺 보고 ────────────────────────────────────────────────────────────
 console.log('\nフン...今回こそちゃんとできたか確認してやろう。');
