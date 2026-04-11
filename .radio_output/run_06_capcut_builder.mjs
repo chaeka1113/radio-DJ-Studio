@@ -59,8 +59,18 @@ const tmats    = template.materials;
 
 // ─── 템플릿에서 정적 소재 추출 ────────────────────────────────────────────────
 const T_STICKER    = tmats.stickers[0];
+const RETRO_FLICKER_EFFECT_ID = '7618619632592620805';
+const _retroFlicker = tmats.video_effects.find(e => e.effect_id === RETRO_FLICKER_EFFECT_ID);
+if (!_retroFlicker) {
+  console.error(
+    '❌ 마스터 템플릿에 레트로 플리커 효과가 없습니다.\n' +
+    'CapCut에서 해당 효과를 적용한 뒤 마스터를 다시 추출하세요.'
+  );
+  process.exit(1);
+}
+
 const T_VE = {
-  BLACK_NOISE: tmats.video_effects.find(e => e.effect_id === '7399470796290166022'),
+  RETRO_FLICKER: _retroFlicker,
   NOISE_OUT:   tmats.video_effects.find(e => e.effect_id === '7582441563750534453'),
   WHITE_IN:    tmats.video_effects.find(e => e.effect_id === '7399466630230609157'),
   TAPE_80S:    tmats.video_effects.find(e => e.effect_id === '7414191309986090245'),
@@ -153,14 +163,16 @@ const epNums = Object.keys(epChunksMap).map(Number).sort((a, b) => a - b);
 // 타임라인 블록: {type, ep?, chunk, sceneStart, sceneEnd, ttsStart, ttsEnd, leadDur}
 const timelineBlocks = [];
 let cursor = 0;
+const BREATHING_ROOM = 2_000_000;  // 대사 후 2초 여백 (블랙스크린 방지)
 
 // SEGMENT A: Opening
 if (openingChunk) {
   const sceneStart = cursor;
   const ttsStart   = cursor + LEAD_DUR;
   const ttsEnd     = ttsStart + openingChunk.durUs;
-  timelineBlocks.push({ type: 'opening', chunk: openingChunk, sceneStart, sceneEnd: ttsEnd, ttsStart, ttsEnd, leadDur: LEAD_DUR });
-  cursor = ttsEnd;
+  const sceneEnd   = ttsEnd + BREATHING_ROOM;  // 마지막 씬 +2초 연장
+  timelineBlocks.push({ type: 'opening', chunk: openingChunk, sceneStart, sceneEnd, ttsStart, ttsEnd, leadDur: LEAD_DUR });
+  cursor = sceneEnd;  // +2초 후 다음 블록 시작
 }
 
 // SEGMENTS B + C: 각 EP (story → dj bridge)
@@ -173,8 +185,9 @@ for (const ep of epNums) {
     const sceneStart = cursor;
     const ttsStart   = cursor + WHITE_IN_DUR;
     const ttsEnd     = ttsStart + storyChunk.durUs;
-    timelineBlocks.push({ type: 'story', ep, chunk: storyChunk, sceneStart, sceneEnd: ttsEnd, ttsStart, ttsEnd, leadDur: WHITE_IN_DUR });
-    cursor = ttsEnd;
+    const sceneEnd   = ttsEnd + BREATHING_ROOM;  // 마지막 씬 +2초 연장
+    timelineBlocks.push({ type: 'story', ep, chunk: storyChunk, sceneStart, sceneEnd, ttsStart, ttsEnd, leadDur: WHITE_IN_DUR });
+    cursor = sceneEnd;  // +2초 후 다음 블록 시작
   }
 
   // SEGMENT C: DJ bridge (Radio+Tape → DJ TTS)
@@ -182,17 +195,18 @@ for (const ep of epNums) {
     const sceneStart = cursor;
     const ttsStart   = cursor + LEAD_DUR;
     const ttsEnd     = ttsStart + djChunk.durUs;
-    timelineBlocks.push({ type: 'dj', ep, chunk: djChunk, sceneStart, sceneEnd: ttsEnd, ttsStart, ttsEnd, leadDur: LEAD_DUR });
-    cursor = ttsEnd;
+    const sceneEnd   = ttsEnd + BREATHING_ROOM;  // 마지막 씬 +2초 연장
+    timelineBlocks.push({ type: 'dj', ep, chunk: djChunk, sceneStart, sceneEnd, ttsStart, ttsEnd, leadDur: LEAD_DUR });
+    cursor = sceneEnd;  // +2초 후 다음 블록 시작
   }
 }
 
-// SEGMENT D: Closing TTS (이미지 없음 — 검은 화면 상태)
+// SEGMENT D: Closing TTS (이미지 없음 — 검은 화면 + 2초 암전 후 Noise Out)
 if (closingChunk) {
   const ttsStart = cursor;
   const ttsEnd   = ttsStart + closingChunk.durUs;
   timelineBlocks.push({ type: 'closing', chunk: closingChunk, sceneStart: null, sceneEnd: null, ttsStart, ttsEnd, leadDur: 0 });
-  cursor = ttsEnd;
+  cursor = ttsEnd + BREATHING_ROOM;  // 클로징 후 2초 암전 여백
 }
 
 // Noise Out 시작 = 모든 콘텐츠 완전 종료 직후 (검은 화면 아웃트로)
@@ -305,6 +319,9 @@ sceneGroups.forEach((group, gi) => {
   // 첫 씬에 리드인 시간 추가 → 씬 총 합 == sceneEnd - sceneStart
   if (baseDurs.length > 0) baseDurs[0] += block.leadDur;
 
+  // 마지막 씬에 +2초 여백 흡수 (대사 끝나도 화면이 2초 더 머묾)
+  baseDurs[baseDurs.length - 1] += BREATHING_ROOM;
+
   let pos = block.sceneStart;
   group.scenes.forEach((scene, si) => {
     const dur = baseDurs[si];
@@ -362,8 +379,8 @@ const M = {
   canvases: [], transitions: [], audio_fades: [], beats: [],
   material_animations: [], placeholder_infos: [], speeds: [], chromas: (tmats.chromas || []).slice(),
   realtime_denoises: [], video_trackings: [], hsl: [],
-  // video_effects: 중복 없이 4종만
-  video_effects: [T_VE.BLACK_NOISE, T_VE.NOISE_OUT, T_VE.WHITE_IN, T_VE.TAPE_80S],
+  // video_effects: 중복 없이 4종만 (레트로 플리커로 교체)
+  video_effects: [T_VE.RETRO_FLICKER, T_VE.NOISE_OUT, T_VE.WHITE_IN, T_VE.TAPE_80S],
   sound_channel_mappings: [], material_colors: [], vocal_separations: [],
   texts: [], tail_leaders: [], images: [], texts_templates: [],
   audio_effects: [], audio_pannings: [], audio_pitch_shifts: [],
@@ -632,7 +649,7 @@ console.log(`  비디오 세그먼트: ${videoSegments.length}개 / B 페이드:
 // ─── STEP 5: 이펙트 + 스티커 빌드 (SKILL 규칙 준수) ──────────────────────────
 console.log('\nSTEP 5: 이펙트 + 스티커 빌드 중...');
 
-const effectSegs3 = [];  // Black Noise / Noise Out / White In
+const effectSegs3 = [];  // Retro Flicker / Noise Out / White In
 const effectSegs4 = [];  // 80s Tape
 const stickerSegs = [];
 
@@ -646,9 +663,9 @@ for (const block of timelineBlocks) {
       trackRenderIndex: 11005,
     }));
 
-    // 2. Black Noise + WAVE 스티커: 정확히 DJ TTS 시작~종료 구간에만
+    // 2. 레트로 플리커 + WAVE 스티커: 정확히 DJ TTS 시작~종료 구간에만
     effectSegs3.push(makeEffectSegment({
-      materialId: T_VE.BLACK_NOISE.id,
+      materialId: T_VE.RETRO_FLICKER.id,
       start: block.ttsStart,
       dur: block.chunk.durUs,
       trackRenderIndex: 11006,
@@ -742,7 +759,10 @@ const pcClickSegs = [];
 // ── BGM: 각 사연 구간 — White In 시작 ~ Story TTS 종료, 루핑 ──
 // SEGMENT B: bgmStart = sceneStart (White In 시작점), bgmEnd = ttsEnd
 const track7Segs = [];
-const BGM_SRC_DUR_US = REF.bgm.duration;
+const bgmActualDurUs = REF.bgm.duration;
+const BGM_MARGIN_US  = 10_000_000;
+const BGM_SRC_DUR_US = Math.max(bgmActualDurUs - BGM_MARGIN_US, 1_000_000);
+// 최소 1초 보장 — BGM 원본이 10초 이하여도 크래시 방지
 
 for (const block of timelineBlocks.filter(b => b.type === 'story')) {
   const bgmStart = block.sceneStart;  // White In 시작점
@@ -965,15 +985,14 @@ const newDraft = {
 
 // ─── QA 검증 (SKILL 5대 편집 규칙 자동 검증) ────────────────────────────────
 function validateTimeline(draft) {
-  const errors = [];
+  const errors  = [];
+  const PAUSE_US = BREATHING_ROOM;  // 2초 여백 상수 (QA 수식용 별칭)
   const allEffectSegs  = draft.tracks.filter(t => t.type === 'effect').flatMap(t => t.segments);
   const allStickerSegs = draft.tracks.filter(t => t.type === 'sticker').flatMap(t => t.segments);
 
   // effect_id 역매핑 (material_id → effect_id)
   const veMap = {};
   for (const ve of draft.materials.video_effects) veMap[ve.id] = ve.effect_id;
-  const BLACK_NOISE_EFFECT_ID = '7399470796290166022';
-
   // QA 1: Radio noise 종료 <= DJ TTS 시작 (겹침 금지)
   for (const block of timelineBlocks.filter(b => b.type === 'opening' || b.type === 'dj')) {
     const radioEnd   = block.sceneStart + NOISE_CLIP_US;
@@ -982,27 +1001,27 @@ function validateTimeline(draft) {
       errors.push(`QA1 [Overlap] ${block.chunk.chunkId}: radio_noise 종료(${(radioEnd/1e6).toFixed(3)}s) > DJ TTS 시작(${(djTtsStart/1e6).toFixed(3)}s)`);
   }
 
-  // QA 2: EP 사연 씬 총 duration == (WHITE_IN_DUR + story_tts_dur) ±1ms
+  // QA 2: EP 사연 씬 총 duration == (WHITE_IN_DUR + story_tts_dur + PAUSE_US) ±1ms
   for (const block of timelineBlocks.filter(b => b.type === 'story')) {
-    const storyScenes = sceneTimeline.filter(s => s._chunk === block.chunk.chunkId);
-    const totalImgDur = storyScenes.reduce((sum, s) => sum + s._dur, 0);
-    const expected    = block.sceneEnd - block.sceneStart;
-    if (Math.abs(totalImgDur - expected) > 1000)
-      errors.push(`QA2 [Duration] EP${block.ep} story: 이미지 총 dur ${totalImgDur}µs ≠ 예상 ${expected}µs (delta ${totalImgDur - expected}µs)`);
+    const storyScenes   = sceneTimeline.filter(s => s._chunk === block.chunk.chunkId);
+    const totalImgDur   = storyScenes.reduce((sum, s) => sum + s._dur, 0);
+    const expectedSceneDur = WHITE_IN_DUR + block.chunk.durUs + PAUSE_US;
+    if (Math.abs(totalImgDur - expectedSceneDur) > 1000)
+      errors.push(`QA2 [Duration] EP${block.ep} story: 이미지 총 dur ${totalImgDur}µs ≠ 예상 ${expectedSceneDur}µs (delta ${totalImgDur - expectedSceneDur}µs)`);
   }
 
-  // QA 3: WAVE 스티커 + Black Noise == 정확히 DJ TTS 구간
+  // QA 3: WAVE 스티커 + 레트로 플리커 == 정확히 DJ TTS 구간
   for (const block of timelineBlocks.filter(b => b.type === 'opening' || b.type === 'dj')) {
     const djStart = block.ttsStart;
     const djDur   = block.chunk.durUs;
 
     const matchBN = allEffectSegs.find(s =>
-      veMap[s.material_id] === BLACK_NOISE_EFFECT_ID &&
+      veMap[s.material_id] === RETRO_FLICKER_EFFECT_ID &&
       s.target_timerange.start === djStart &&
       s.target_timerange.duration === djDur
     );
     if (!matchBN)
-      errors.push(`QA3 [Sync] ${block.chunk.chunkId}: Black Noise가 DJ TTS 구간(${(djStart/1e6).toFixed(2)}s, ${(djDur/1e6).toFixed(2)}s)과 불일치`);
+      errors.push(`QA3 [Sync] ${block.chunk.chunkId}: 레트로 플리커가 DJ TTS 구간(${(djStart/1e6).toFixed(2)}s, ${(djDur/1e6).toFixed(2)}s)과 불일치`);
 
     const matchStk = allStickerSegs.find(s =>
       s.target_timerange.start === djStart &&
@@ -1012,19 +1031,28 @@ function validateTimeline(draft) {
       errors.push(`QA3 [Sync] ${block.chunk.chunkId}: WAVE 스티커가 DJ TTS 구간(${(djStart/1e6).toFixed(2)}s)과 불일치`);
   }
 
-  // QA 4: White In 종료 == Story TTS 시작 (1µs 허용)
-  for (const block of timelineBlocks.filter(b => b.type === 'story')) {
+  // QA 4: 이전 TTS 종료 + PAUSE_US == White In 시작 (breathing room 삽입 검증)
+  const storyBlocks = timelineBlocks.filter(b => b.type === 'story');
+  for (const block of storyBlocks) {
+    const blockIdx  = timelineBlocks.indexOf(block);
+    const prevBlock = blockIdx > 0 ? timelineBlocks[blockIdx - 1] : null;
+    if (prevBlock) {
+      const whiteInStart     = block.sceneStart;
+      const expectedWIStart  = prevBlock.ttsEnd + PAUSE_US;
+      if (Math.abs(whiteInStart - expectedWIStart) > 1000)
+        errors.push(`QA4 [Sync] EP${block.ep}: White In 시작(${(whiteInStart/1e6).toFixed(3)}s) ≠ 이전 TTS 종료+2s(${(expectedWIStart/1e6).toFixed(3)}s)`);
+    }
+    // White In 종료 == Story TTS 시작 (구조적 보증)
     const whiteInEnd = block.sceneStart + WHITE_IN_DUR;
     if (Math.abs(whiteInEnd - block.ttsStart) > 1)
       errors.push(`QA4 [Sync] EP${block.ep}: White In 종료(${(whiteInEnd/1e6).toFixed(3)}s) ≠ Story TTS 시작(${(block.ttsStart/1e6).toFixed(3)}s)`);
   }
 
-  // QA 5: Noise Out 시작 == max(마지막 이미지 종료, 마지막 TTS 종료) — 의도된 암전 아웃트로
-  const lastImgEnd  = sceneTimeline.length ? sceneTimeline[sceneTimeline.length - 1]._end : 0;
+  // QA 5: Noise Out 시작 == 마지막 TTS 종료 + PAUSE_US (2초 암전 아웃트로 검증)
   const lastTtsEnd  = timelineBlocks[timelineBlocks.length - 1].ttsEnd;
-  const expectedNOS = Math.max(lastImgEnd, lastTtsEnd);
-  if (noiseOutStart !== expectedNOS)
-    errors.push(`QA5 [Outro] Noise Out 시작(${(noiseOutStart/1e6).toFixed(3)}s) ≠ 예상(${(expectedNOS/1e6).toFixed(3)}s)`);
+  const expectedNOS = lastTtsEnd + PAUSE_US;
+  if (Math.abs(noiseOutStart - expectedNOS) > 1000)
+    errors.push(`QA5 [Outro] Noise Out 시작(${(noiseOutStart/1e6).toFixed(3)}s) ≠ 마지막 TTS 종료+2s(${(expectedNOS/1e6).toFixed(3)}s)`);
 
   // QA 6: 사연 BGM start <= White In start AND BGM end >= Story TTS end
   for (const block of timelineBlocks.filter(b => b.type === 'story')) {
