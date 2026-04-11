@@ -1,21 +1,20 @@
 import fs from 'fs';
-import path from 'path';
 import https from 'https';
-import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
+import { loadEnv, requireEnv } from './lib/env.mjs';
+import { generateEpId, makePaths, ensureDirs, updateStage } from './lib/paths.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const API_KEY = process.env.GEMINI_API_KEY;
-if (!API_KEY) { console.error('❌ GEMINI_API_KEY 없음'); process.exit(1); }
+loadEnv();
+const epId = process.env.EP_ID ?? generateEpId();
+const P    = makePaths(epId);
+ensureDirs(P);
+const API_KEY = requireEnv('GEMINI_API_KEY');
 
-const storyboard = JSON.parse(fs.readFileSync(path.join(__dirname, '04_storyboard.json'), 'utf-8'));
+const storyboard = JSON.parse(fs.readFileSync(P.storyboard, 'utf-8'));
 // flat 배열(신규) 또는 episodes[].scenes(구형) 모두 지원
 const scenes = storyboard.scenes
   ?? storyboard.episodes?.flatMap(ep => (ep.scenes || []).map(s => ({ ...s, episode_id: ep.episode_id ?? ep.id })))
   ?? [];
-
-const imagesDir = path.join(__dirname, 'images');
-if (!fs.existsSync(imagesDir)) fs.mkdirSync(imagesDir, { recursive: true });
 
 // Imagen 4.0 REST API
 async function generateImageImagen3(prompt) {
@@ -120,7 +119,7 @@ console.log(`   예상 소요: 약 ${Math.ceil(scenes.length * 15 / 60)}분\n`);
 
 for (let i = 0; i < scenes.length; i++) {
   const scene = scenes[i];
-  const filePath = path.join(imagesDir, `${scene.scene_id}.png`);
+  const filePath = P.images + '/' + scene.scene_id + '.png';
 
   // ✅ 멱등성: 이미 생성된 파일 스킵
   if (fs.existsSync(filePath)) {
@@ -153,7 +152,7 @@ for (let i = 0; i < scenes.length; i++) {
 }
 
 fs.writeFileSync(
-  path.join(__dirname, '05_image_results.json'),
+  P.imageResults,
   JSON.stringify({ results, summary: { success, failed: fail } }, null, 2),
   'utf-8'
 );

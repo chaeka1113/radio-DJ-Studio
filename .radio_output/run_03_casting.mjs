@@ -1,17 +1,19 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { loadEnv, requireEnv } from './lib/env.mjs';
+import { generateEpId, makePaths, ensureDirs } from './lib/paths.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const API_KEY = process.env.GEMINI_API_KEY;
-if (!API_KEY) { console.error('❌ GEMINI_API_KEY 없음'); process.exit(1); }
+loadEnv();
+const epId = process.env.EP_ID ?? generateEpId();
+const P    = makePaths(epId);
+ensureDirs(P);
+const API_KEY = requireEnv('GEMINI_API_KEY');
 
 // ── 전역 규칙 로드 ────────────────────────────────────────────────────────────
-const globalRules = fs.readFileSync(path.join(__dirname, '../.claude/skills/ref_visual_rules.md'), 'utf-8');
-const visualRubric = fs.readFileSync(path.join(__dirname, '../.claude/skills/ref_visual_rubric.md'), 'utf-8');
+const globalRules  = fs.readFileSync(P.refVisual, 'utf-8');
+const visualRubric = fs.readFileSync(P.refVisualRubric, 'utf-8');
 
-const djScript = JSON.parse(fs.readFileSync(path.join(__dirname, '02_dj_script.json'), 'utf-8'));
+const djScript = JSON.parse(fs.readFileSync(P.djScript, 'utf-8'));
 
 const genAI = new GoogleGenerativeAI(API_KEY);
 const model = genAI.getGenerativeModel({
@@ -136,14 +138,14 @@ Output JSON only:
 }
 
 fs.writeFileSync(
-  path.join(__dirname, '03_character_prompts.json'),
+  P.characterPrompts,
   JSON.stringify({ characters }, null, 2),
   'utf-8'
 );
 console.log('✅ 03_character_prompts.json 저장 완료');
 
 // PATCH 5: ref_character_sheet.json 생성
-const scripts01 = JSON.parse(fs.readFileSync(path.join(__dirname, '01_scripts.json'), 'utf-8'));
+const scripts01 = JSON.parse(fs.readFileSync(P.scripts, 'utf-8'));
 const CLOTHING_KEYWORDS = [
   'スニーカー', 'デニム', 'パーカー', 'ジャケット', 'スーツ', 'セーター', 'ワンピース',
   'コート', 'Tシャツ', 'ブラウス', 'スカート', 'トレーナー', 'ニット', 'カーディガン',
@@ -177,7 +179,7 @@ const characterSheet = scripts01.episodes.map(ep => {
 });
 
 fs.writeFileSync(
-  path.join(__dirname, 'ref_character_sheet.json'),
+  P.characterSheet,
   JSON.stringify(characterSheet, null, 2),
   'utf-8'
 );

@@ -20,23 +20,13 @@
  */
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { loadEnv } from './lib/env.mjs';
+import { generateEpId, makePaths, ensureDirs } from './lib/paths.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-// .env 로드
-const envPath = path.join(__dirname, '../.env');
-if (fs.existsSync(envPath)) {
-  for (const line of fs.readFileSync(envPath, 'utf-8').split('\n')) {
-    const t = line.trim();
-    if (!t || t.startsWith('#')) continue;
-    const idx = t.indexOf('=');
-    if (idx === -1) continue;
-    const k = t.slice(0, idx).trim(), v = t.slice(idx + 1).trim();
-    if (!process.env[k]) process.env[k] = v;
-  }
-}
+loadEnv();
+const epId = process.env.EP_ID ?? generateEpId();
+const P    = makePaths(epId);
+ensureDirs(P);
 
 const CUTLINE = 90;
 const MAX_FIX_RETRIES = 3;
@@ -54,16 +44,13 @@ const IMAGEN_PROMPT_MAX_CHARS = 2000;
 const MIDJOURNEY_PARAM_RE = /--\w[\w:]+(\s+[\w.:]+)?/g;
 
 (async () => {
-  const storyboardPath = path.join(__dirname, '04_storyboard.json');
-  const rubricPath     = path.join(__dirname, '../.claude/skills/ref_visual_rubric.md');
-
   // ── 필수 파일 체크 ─────────────────────────────────────────────────────────
-  if (!fs.existsSync(storyboardPath)) {
+  if (!fs.existsSync(P.storyboard)) {
     console.error('❌ 04_storyboard.json 없음');
     process.exitCode = 1;
     return;
   }
-  if (!fs.existsSync(rubricPath)) {
+  if (!fs.existsSync(P.refVisualRubric)) {
     console.error('❌ ref_visual_rubric.md 없음');
     process.exitCode = 1;
     return;
@@ -72,9 +59,9 @@ const MIDJOURNEY_PARAM_RE = /--\w[\w:]+(\s+[\w.:]+)?/g;
   const API_KEY = process.env.GEMINI_API_KEY;
   if (!API_KEY) {
     console.warn('⚠️ GEMINI_API_KEY 없음 — Visual QA 스킵 (Pass 처리)');
-    const storyboard = JSON.parse(fs.readFileSync(storyboardPath, 'utf-8'));
+    const storyboard = JSON.parse(fs.readFileSync(P.storyboard, 'utf-8'));
     const total = (storyboard.scenes || storyboard).length;
-    fs.writeFileSync(path.join(__dirname, '04_visual_qa_result.json'), JSON.stringify({
+    fs.writeFileSync(P.visualQaResult, JSON.stringify({
       verdict: 'Pass', skipped: true, total_scenes: total,
       checked_scenes: 0, fixed_scenes: 0, failed_scenes: [],
       summary: 'GEMINI_API_KEY 없음 — 스킵',
@@ -83,8 +70,8 @@ const MIDJOURNEY_PARAM_RE = /--\w[\w:]+(\s+[\w.:]+)?/g;
     return;
   }
 
-  const rubricText  = fs.readFileSync(rubricPath, 'utf-8');
-  let storyboard    = JSON.parse(fs.readFileSync(storyboardPath, 'utf-8'));
+  const rubricText  = fs.readFileSync(P.refVisualRubric, 'utf-8');
+  let storyboard    = JSON.parse(fs.readFileSync(P.storyboard, 'utf-8'));
   // 스토리보드는 배열 또는 { scenes: [] } 형태 모두 허용
   const scenes      = Array.isArray(storyboard) ? storyboard : (storyboard.scenes || []);
 
@@ -425,10 +412,10 @@ Return ONLY valid JSON, no other text:
 
   // ── 교정된 스토리보드 저장 ────────────────────────────────────────────
   if (Array.isArray(storyboard)) {
-    fs.writeFileSync(storyboardPath, JSON.stringify(scenes, null, 2), 'utf-8');
+    fs.writeFileSync(P.storyboard, JSON.stringify(scenes, null, 2), 'utf-8');
   } else {
     storyboard.scenes = scenes;
-    fs.writeFileSync(storyboardPath, JSON.stringify(storyboard, null, 2), 'utf-8');
+    fs.writeFileSync(P.storyboard, JSON.stringify(storyboard, null, 2), 'utf-8');
   }
   console.log('💾 04_storyboard.json 업데이트 완료 (LLM Auto-fix + Payload 교정 반영)');
 
@@ -458,7 +445,7 @@ Return ONLY valid JSON, no other text:
   };
 
   fs.writeFileSync(
-    path.join(__dirname, '04_visual_qa_result.json'),
+    P.visualQaResult,
     JSON.stringify(qaResultPayload, null, 2),
     'utf-8'
   );

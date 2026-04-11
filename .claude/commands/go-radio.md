@@ -1,6 +1,6 @@
 ---
 name: go-radio
-description: "[Trigger] 사용자가 /go-radio (또는 /go-radio [주제1] [주제2] [주제3], --qa 플래그 포함)을 실행할 때. [Action] 주제 미입력 시 Yahoo Japan+NHK RSS로 트렌드를 자동 수집한다. --qa 플래그를 파싱하고 트렌드수집(00, 자동모드)→대본(01)→DJ멘트(02)→캐스팅(03)→[즉문즉답(08, --qa시만)]→스토리보드(04)→이미지(05)→TTS합본(07)→웹대시보드(서버 실행) 전체 파이프라인을 순서대로 실행한다. 결과를 .radio_output/에 저장하고 http://localhost:3000 대시보드를 제공."
+description: "[Trigger] 사용자가 /go-radio (또는 /go-radio [주제1] [주제2] [주제3], --qa 플래그 포함)을 실행할 때. [Action] 주제 미입력 시 Yahoo Japan+NHK RSS로 트렌드를 자동 수집한다. --qa 플래그를 파싱하고 EP_ID(EP_YYYYMMDD_HHMM) 생성 후 트렌드수집(00, 자동모드)→대본(01)→DJ멘트(02)→캐스팅(03)→[즉문즉답(08, --qa시만)]→스토리보드(04)→이미지(05)→TTS합본(07)→웹대시보드(서버 실행) 전체 파이프라인을 순서대로 실행한다. 결과를 .output/{EP_ID}/에 격리 저장하고 http://localhost:3000 대시보드를 제공."
 ---
 
 # /go-radio
@@ -41,13 +41,22 @@ echo "KEY: ${GEMINI_API_KEY:0:10}..."
 
 ---
 
-## STEP 0 — 플래그 파싱 & 주제 결정
+## STEP 0 — EP_ID 생성 + 플래그 파싱 + 주제 결정
 
+**[0-A] EP_ID 생성** (파이프라인 최초 1회):
+```bash
+EP_ID="EP_$(date +%Y%m%d_%H%M)"
+echo "📌 에피소드 ID: $EP_ID"
+mkdir -p /c/radio-dj-studio/.output/$EP_ID/{images,audio,videos,capcut}
+```
+이후 모든 단계는 `EP_ID` 환경변수를 참조하거나 `--ep-id $EP_ID` 인수로 전달한다.
+
+**[0-B] 플래그 파싱:**
 `$ARGUMENTS`에서 `--qa` 감지:
 - 포함 → `QA_MODE=true`, 주제는 나머지 인수
 - 미포함 → `QA_MODE=false`
 
-**주제 결정 (2가지 경로):**
+**[0-C] 주제 결정 (2가지 경로):**
 
 **A) 주제 직접 입력** (`$ARGUMENTS`에 주제가 3개 이상 있을 때):
 - `$ARGUMENTS`의 비-플래그 인수 3개를 주제로 사용

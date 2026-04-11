@@ -42,8 +42,15 @@ next-env.d.ts
 
 
 # --- 텐키 할배 라디오 AI 생성 결과물 (용량 폭발 방지) ---
+# 하네스 코드(.mjs)는 추적, 런타임 산출물은 제외
 .radio_output/*
 !.radio_output/*.mjs
+!.radio_output/lib/
+
+# EP_ID 격리 산출물 디렉토리 (이미지/오디오/영상 등 대용량 포함)
+.output/
+
+# 구버전 플랫 경로 (마이그레이션 완료 후 삭제 예정)
 audio/
 images/
 videos/

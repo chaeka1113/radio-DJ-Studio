@@ -11,27 +11,16 @@
  */
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { loadEnv, requireEnv } from './lib/env.mjs';
+import { generateEpId, makePaths } from './lib/paths.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+loadEnv();
+const epId = process.env.EP_ID ?? generateEpId();
+const P    = makePaths(epId);
 
-// .env 로드
-const envPath = path.join(__dirname, '../.env');
-if (fs.existsSync(envPath)) {
-  for (const line of fs.readFileSync(envPath, 'utf-8').split('\n')) {
-    const t = line.trim();
-    if (!t || t.startsWith('#')) continue;
-    const idx = t.indexOf('=');
-    if (idx === -1) continue;
-    const k = t.slice(0, idx).trim(), v = t.slice(idx + 1).trim();
-    if (!process.env[k]) process.env[k] = v;
-  }
-}
-
-const LEARNINGS_PATH = path.join(__dirname, '../.claude/skills/ref_learnings.md');
-const FEEDBACK_PATH  = path.join(__dirname, '01_qa_feedback.json');
-const RESULT_PATH    = path.join(__dirname, '01_qa_result.json');
+const LEARNINGS_PATH = P.learnings;
+const FEEDBACK_PATH  = P.qaFeedback;
+const RESULT_PATH    = P.qaResult;
 const MAX_BULLETS    = 10;
 
 (async () => {

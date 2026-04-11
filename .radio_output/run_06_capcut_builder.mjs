@@ -15,46 +15,45 @@
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
-import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
-import { config as loadEnv } from 'dotenv';
+import { loadEnv } from './lib/env.mjs';
+import { generateEpId, makePaths, ensureDirs, updateStage } from './lib/paths.mjs';
 
-const __dirname  = path.dirname(fileURLToPath(import.meta.url));
-loadEnv({ path: path.join(__dirname, '..', '.env') });
+loadEnv();
+const epId   = process.env.EP_ID ?? generateEpId();
+const P      = makePaths(epId);
+ensureDirs(P);
 const newUUID    = () => randomUUID().toUpperCase();
 const toUs       = (sec) => Math.round(sec * 1_000_000);
 const normPath   = (p) => (p || '').replace(/\\/g, '/');
 
 // ─── STEP 0: 전제조건 확인 ────────────────────────────────────────────────────
 
-const refMatPath = path.join(__dirname, 'ref_capcut_materials.json');
-if (!fs.existsSync(refMatPath)) {
+if (!fs.existsSync(P.capcutMaterials)) {
   console.error('❌ ref_capcut_materials.json 없음');
   console.error('   먼저 실행: node .radio_output/run_00_extract_materials.mjs');
   process.exit(1);
 }
-const REF = JSON.parse(fs.readFileSync(refMatPath, 'utf-8'));
+const REF = JSON.parse(fs.readFileSync(P.capcutMaterials, 'utf-8'));
 
-const audioDir = path.join(__dirname, 'audio');
+const audioDir = P.audio;
 const tsFiles  = fs.readdirSync(audioDir).filter(f => f.endsWith('_timestamps.json')).sort();
 if (tsFiles.length === 0) {
   console.error('❌ audio/*_timestamps.json 없음 — run_07_audio.mjs 먼저 실행');
   process.exit(1);
 }
 
-const sbPath = path.join(__dirname, '04_storyboard.json');
-if (!fs.existsSync(sbPath)) {
+if (!fs.existsSync(P.storyboard)) {
   console.error('❌ 04_storyboard.json 없음 — run_04_storyboard.mjs 먼저 실행');
   process.exit(1);
 }
 
 // ─── 템플릿 (정적 CapCut 메타데이터 소스) ────────────────────────────────────
-const TEMPLATE_PATH = path.join(path.dirname(__dirname), 'draft_content.json');
-if (!fs.existsSync(TEMPLATE_PATH)) {
+if (!fs.existsSync(P.capcutTemplate)) {
   console.error('❌ 프로젝트 루트 draft_content.json 없음 (템플릿 참조용)');
   process.exit(1);
 }
-const template = JSON.parse(fs.readFileSync(TEMPLATE_PATH, 'utf-8'));
+const template = JSON.parse(fs.readFileSync(P.capcutTemplate, 'utf-8'));
 const tmats    = template.materials;
 
 // ─── 템플릿에서 정적 소재 추출 ────────────────────────────────────────────────
@@ -86,8 +85,8 @@ const HSL_LUMI     = normPath(T_HSL?.lumi_hub_path || '');
 const DENOISE_PATH = normPath(T_DENOISE?.path || '');
 
 // ─── 상수 ─────────────────────────────────────────────────────────────────────
-const IMAGE_DIR  = path.join(__dirname, 'images');
-const OUTPUT_DIR = path.join(__dirname, 'capcut_output');
+const IMAGE_DIR  = P.images;
+const OUTPUT_DIR = P.capcut;
 const OUTPUT_PATH= path.join(OUTPUT_DIR, 'draft_content.json');
 
 const SCALE_MAX        = 1.15;
@@ -116,12 +115,12 @@ console.log('\nSTEP 1: chunks 맵 구성 중...');
 const chunks = {};
 
 for (const fname of tsFiles) {
-  const raw     = JSON.parse(fs.readFileSync(path.join(audioDir, fname), 'utf-8'));
+  const raw     = JSON.parse(fs.readFileSync(path.join(P.audio, fname), 'utf-8'));
   const chunkId = raw.chunk_id;
   const m       = chunkId.match(/^(\d+)_(?:ep(\d+)_)?(.+)$/);
   if (!m) { console.error(`chunk_id 파싱 실패: ${chunkId}`); process.exit(1); }
 
-  const mp3Path = path.join(audioDir, chunkId + '.mp3');
+  const mp3Path = path.join(P.audio, chunkId + '.mp3');
   if (!fs.existsSync(mp3Path)) {
     console.error(`❌ MP3 없음: ${mp3Path}`); process.exit(1);
   }
@@ -283,7 +282,7 @@ function calcSceneDurations(chunkId, sceneCount) {
 }
 
 // 스토리보드 씬을 그룹화 (episode_id 기준, 기존 로직 유지)
-const storyboard = JSON.parse(fs.readFileSync(sbPath, 'utf-8'));
+const storyboard = JSON.parse(fs.readFileSync(P.storyboard, 'utf-8'));
 const sbScenes   = storyboard.scenes;
 
 const sceneGroups = [];
@@ -1104,7 +1103,7 @@ fs.writeFileSync(OUTPUT_PATH, JSON.stringify(newDraft, null, 2), 'utf-8');
   fs.mkdirSync(targetDir, { recursive: true });
 
   // 2. 껍데기(meta_info) 로드
-  const metaTemplatePath = path.join(__dirname, 'master_template', 'draft_meta_info.json');
+  const metaTemplatePath = path.join(P.masterTemplate, 'draft_meta_info.json');
   if (!fs.existsSync(metaTemplatePath)) {
     console.error('❌ master_template/draft_meta_info.json 없음');
     console.error('   먼저 실행: node .radio_output/run_00_extract_meta.mjs');

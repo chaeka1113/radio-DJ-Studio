@@ -1,37 +1,24 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { loadEnv, requireEnv } from './lib/env.mjs';
+import { generateEpId, makePaths, ensureDirs, updateStage } from './lib/paths.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-// .env 로드 (루트 기준)
-const envPath = path.join(__dirname, '../.env');
-if (fs.existsSync(envPath)) {
-  const envContent = fs.readFileSync(envPath, 'utf-8');
-  for (const line of envContent.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const idx = trimmed.indexOf('=');
-    if (idx === -1) continue;
-    const key = trimmed.slice(0, idx).trim();
-    const val = trimmed.slice(idx + 1).trim();
-    if (!process.env[key]) process.env[key] = val;
-  }
-}
+loadEnv();
+const epId = process.env.EP_ID ?? generateEpId();
+const P    = makePaths(epId);
+ensureDirs(P);
 
 // PATCH 4: --qna 플래그 파싱
 const includeQna = process.argv.includes('--qna');
 
-const API_KEY = process.env.GEMINI_API_KEY;
-if (!API_KEY) { console.error('❌ GEMINI_API_KEY 없음'); process.exit(1); }
+const API_KEY = requireEnv('GEMINI_API_KEY');
 
-const scripts = JSON.parse(fs.readFileSync(path.join(__dirname, '01_scripts.json'), 'utf-8'));
+const scripts = JSON.parse(fs.readFileSync(P.scripts, 'utf-8'));
 const [ep1, ep2, ep3] = scripts.episodes;
 
 // ── 규칙 주입 ──────────────────────────────────────────────────────────────────
-const referenceKnowledge = fs.readFileSync(path.join(__dirname, '../.claude/skills/ref_persona_rules.md'), 'utf-8');
-const scriptRubric = fs.readFileSync(path.join(__dirname, '../.claude/skills/ref_script_rubric.md'), 'utf-8');
+const referenceKnowledge = fs.readFileSync(P.refPersona, 'utf-8');
+const scriptRubric = fs.readFileSync(P.refScriptRubric, 'utf-8');
 
 // ── 실시간 도쿄 날씨 ───────────────────────────────────────────────────────────
 async function fetchTokyoWeather() {
@@ -202,11 +189,11 @@ if (includeQna && djMents.qa_segment) {
     qa_pairs: (djMents.qa_segment.pairs || []).map(p => ({ question: p.q, answer: p.a })),
     outro: merged.show_closing,
   };
-  fs.writeFileSync(path.join(__dirname, '08_qa_script.json'), JSON.stringify(qaOut, null, 2), 'utf-8');
+  fs.writeFileSync(P.qaScript, JSON.stringify(qaOut, null, 2), 'utf-8');
   console.log('✅ 08_qa_script.json 저장 완료 (Q&A 코너)');
 }
 
-fs.writeFileSync(path.join(__dirname, '02_dj_script.json'), JSON.stringify(merged, null, 2), 'utf-8');
+fs.writeFileSync(P.djScript, JSON.stringify(merged, null, 2), 'utf-8');
 
 console.log('✅ 02_dj_script.json 저장 완료');
 console.log(`   🌤  날씨: ${realTimeWeather}`);

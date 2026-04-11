@@ -5,26 +5,15 @@
  */
 import Anthropic from '@anthropic-ai/sdk';
 import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { loadEnv, requireEnv } from './lib/env.mjs';
+import { generateEpId, makePaths, ensureDirs, initManifest } from './lib/paths.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+loadEnv();
+const epId = process.env.EP_ID ?? generateEpId();
+const P    = makePaths(epId);
+ensureDirs(P);
 
-// .env 로드 (루트 기준)
-const envPath = path.join(__dirname, '../.env');
-if (fs.existsSync(envPath)) {
-  for (const line of fs.readFileSync(envPath, 'utf-8').split('\n')) {
-    const t = line.trim();
-    if (!t || t.startsWith('#')) continue;
-    const idx = t.indexOf('=');
-    if (idx === -1) continue;
-    const k = t.slice(0, idx).trim(), v = t.slice(idx + 1).trim();
-    if (!process.env[k]) process.env[k] = v;
-  }
-}
-
-const API_KEY = process.env.ANTHROPIC_API_KEY;
-if (!API_KEY) { console.error('❌ ANTHROPIC_API_KEY 없음'); process.exit(1); }
+const API_KEY = requireEnv('ANTHROPIC_API_KEY');
 
 const allArgs = process.argv.slice(2);
 const includeMz = allArgs.includes('--mz');
@@ -33,9 +22,8 @@ let topics = allArgs.filter(a => !a.startsWith('--'));
 
 // 주제 미입력 시 00_trends.json 폴백
 if (topics.length < 3) {
-  const trendsPath = path.join(__dirname, '00_trends.json');
-  if (fs.existsSync(trendsPath)) {
-    const trends = JSON.parse(fs.readFileSync(trendsPath, 'utf-8'));
+  if (fs.existsSync(P.trends)) {
+    const trends = JSON.parse(fs.readFileSync(P.trends, 'utf-8'));
     if (Array.isArray(trends.topics) && trends.topics.length >= 3) {
       topics = trends.topics.slice(0, 3);
       console.log(`📡 [Planner] 트렌드 자동 수집 주제 사용:`);
@@ -46,14 +34,12 @@ if (topics.length < 3) {
 }
 
 // 이전 피드백 파일 초기화 (새 파이프라인 시작 시 stale 피드백 제거)
-const feedbackPath = path.join(__dirname, '01_qa_feedback.json');
-if (fs.existsSync(feedbackPath)) {
-  fs.unlinkSync(feedbackPath);
+if (fs.existsSync(P.qaFeedback)) {
+  fs.unlinkSync(P.qaFeedback);
   console.log('🗑  이전 QA 피드백 초기화');
 }
-const qaResultPath = path.join(__dirname, '01_qa_result.json');
-if (fs.existsSync(qaResultPath)) {
-  fs.unlinkSync(qaResultPath);
+if (fs.existsSync(P.qaResult)) {
+  fs.unlinkSync(P.qaResult);
 }
 
 // MZ 에피소드 번호 결정
@@ -131,7 +117,8 @@ while (retryCount < 3) {
   }
 }
 
-fs.writeFileSync(path.join(__dirname, 'ref_episode_contract.json'), JSON.stringify(contract, null, 2), 'utf-8');
+fs.writeFileSync(P.epContract, JSON.stringify(contract, null, 2), 'utf-8');
+initManifest(P, { epId, topics, qaMode: includeQna });
 
 console.log('✅ [Planner] 계약서 생성 완료 → ref_episode_contract.json');
 contract.episodes.forEach(ep => {

@@ -1,28 +1,28 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { loadEnv, requireEnv } from './lib/env.mjs';
+import { generateEpId, makePaths, ensureDirs, updateStage } from './lib/paths.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const API_KEY = process.env.GEMINI_API_KEY;
-if (!API_KEY) { console.error('❌ GEMINI_API_KEY 없음'); process.exit(1); }
+loadEnv();
+const epId = process.env.EP_ID ?? generateEpId();
+const P    = makePaths(epId);
+ensureDirs(P);
+const API_KEY = requireEnv('GEMINI_API_KEY');
 
 // ── 전역 규칙 로드 ────────────────────────────────────────────────────────────
-const globalRules = fs.readFileSync(path.join(__dirname, '../.claude/skills/ref_visual_rules.md'), 'utf-8');
-const visualRubric = fs.readFileSync(path.join(__dirname, '../.claude/skills/ref_visual_rubric.md'), 'utf-8');
+const globalRules  = fs.readFileSync(P.refVisual, 'utf-8');
+const visualRubric = fs.readFileSync(P.refVisualRubric, 'utf-8');
 
-const djScript = JSON.parse(fs.readFileSync(path.join(__dirname, '02_dj_script.json'), 'utf-8'));
-const charPrompts = JSON.parse(fs.readFileSync(path.join(__dirname, '03_character_prompts.json'), 'utf-8'));
+const djScript   = JSON.parse(fs.readFileSync(P.djScript, 'utf-8'));
+const charPrompts = JSON.parse(fs.readFileSync(P.characterPrompts, 'utf-8'));
 
 // PATCH 6: ref_character_sheet.json 로드
 let characterSheet = {};
-const sheetPath = path.join(__dirname, 'ref_character_sheet.json');
-if (fs.existsSync(sheetPath)) {
-  characterSheet = JSON.parse(fs.readFileSync(sheetPath, 'utf-8'));
+if (fs.existsSync(P.characterSheet)) {
+  characterSheet = JSON.parse(fs.readFileSync(P.characterSheet, 'utf-8'));
 }
 
-const qaPath = path.join(__dirname, '08_qa_script.json');
-const hasQA = fs.existsSync(qaPath);
+const hasQA = fs.existsSync(P.qaScript);
 if (hasQA) console.log('ℹ️  QA 코너 감지 → EP2 직후 DJ_SHOT 씬 삽입 예정');
 
 const genAI = new GoogleGenerativeAI(API_KEY);
@@ -269,7 +269,24 @@ const output = {
   scenes: allScenes,
 };
 
-fs.writeFileSync(path.join(__dirname, '04_storyboard.json'), JSON.stringify(output, null, 2), 'utf-8');
+fs.writeFileSync(P.storyboard, JSON.stringify(output, null, 2), 'utf-8');
 console.log(`\n✅ 04_storyboard.json 저장 완료`);
 console.log(`   총 ${output.total_scenes}씬 | 약 ${Math.floor(totalDuration / 60)}분 ${totalDuration % 60}초`);
 if (hasQA) console.log(`   QA DJ_SHOT 5씬 포함됨`);
+
+// ── 04_storyboard_summary.json 생성 (다운스트림 에이전트용 경량 뷰) ────────────
+const summary = {
+  ep_id:           epId,
+  total_scenes:    output.total_scenes,
+  estimated_duration_sec: output.estimated_duration_sec,
+  scenes: output.scenes.map(sc => ({
+    scene_id:    sc.scene_id,
+    type:        sc.type,
+    episode_id:  sc.episode_id ?? null,
+    speaker:     sc.speaker ?? null,
+    duration_sec: sc.duration_sec,
+  })),
+};
+fs.writeFileSync(P.storyboardSummary, JSON.stringify(summary, null, 2), 'utf-8');
+console.log(`   📋 04_storyboard_summary.json 생성 완료 (경량 뷰)`);
+updateStage(P, 'storyboarded');

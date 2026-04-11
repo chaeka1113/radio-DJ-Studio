@@ -3,12 +3,16 @@ import path from 'path';
 import https from 'https';
 import os from 'os';
 import { execFileSync, execSync } from 'child_process';
-import { fileURLToPath } from 'url';
+import { loadEnv } from './lib/env.mjs';
+import { generateEpId, makePaths, ensureDirs, updateStage } from './lib/paths.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+loadEnv();
+const epId = process.env.EP_ID ?? generateEpId();
+const P    = makePaths(epId);
+ensureDirs(P);
 
 // ── 규칙 주입 (V3 가이드라인 우선 로드) ─────────────────────────────────────────
-const referenceKnowledge = fs.readFileSync(path.join(__dirname, '../.claude/skills/ref_tts_v3_rules.md'), 'utf-8');
+const referenceKnowledge = fs.readFileSync(P.refTts, 'utf-8');
 
 // ── FFmpeg 가용성 체크 & 전역 묵음 파일 생성 ──────────────────────────────────
 const SILENCE_SEC = 1.5; // 세그먼트 간 묵음 (초)
@@ -61,10 +65,10 @@ function getRandomCallerVoiceId() {
 }
 
 // ── 데이터 로드 ───────────────────────────────────────────────────────────────
-const djScript = JSON.parse(fs.readFileSync(path.join(__dirname, '02_dj_script.json'), 'utf-8'));
+const djScript = JSON.parse(fs.readFileSync(P.djScript, 'utf-8'));
 
 let qaScript = null;
-const qaPath = path.join(__dirname, '08_qa_script.json');
+const qaPath = P.qaScript;
 if (fs.existsSync(qaPath)) {
   qaScript = JSON.parse(fs.readFileSync(qaPath, 'utf-8'));
   console.log('ℹ️  즉문즉답 코너 병합 활성화');
@@ -335,12 +339,12 @@ if (qaScript) {
 
 ttsText += `\n${SEP}\n방송 엔딩\n${SEP}\n\n【テンキ爺 — 엔딩】\n${cleanForTTS(djScript.show_closing)}\n`;
 
-fs.writeFileSync(path.join(__dirname, 'final_script_for_tts.txt'), ttsText, 'utf-8');
+fs.writeFileSync(P.finalTtsScript, ttsText, 'utf-8');
 console.log('📄 final_script_for_tts.txt 저장 완료');
 
 // ── 출력 폴더 ─────────────────────────────────────────────────────────────────
-const audioDir = path.join(__dirname, 'audio');
-if (!fs.existsSync(audioDir)) fs.mkdirSync(audioDir, { recursive: true });
+const audioDir = P.audio;
+
 
 // ── 메인 실행 ─────────────────────────────────────────────────────────────────
 console.log('🎬 ElevenLabs TTS 파이프라인 시작 (eleven_v3)');
@@ -402,7 +406,7 @@ for (const chunk of audioChunks) {
 }
 
 // 매니페스트 저장 (영상 파이프라인에서 청크 목록/메타데이터 참조용)
-fs.writeFileSync(path.join(__dirname, '09_audio_manifest.json'), JSON.stringify(manifest, null, 2), 'utf-8');
+fs.writeFileSync(P.audioManifest, JSON.stringify(manifest, null, 2), 'utf-8'); updateStage(P, 'audio_done');
 console.log('📋 09_audio_manifest.json 저장 완료 (영상 파이프라인 연동용)');
 
 // ── 가비지 컬렉션: 전역 임시 파일 삭제 ──────────────────────────────────────
@@ -434,7 +438,7 @@ if (HAS_FFMPEG) {
   ];
   const durations = {};
   for (const { key, file } of epAudioFiles) {
-    const filePath = path.join(__dirname, file);
+    const filePath = path.join(P.audio, path.basename(file));
     if (fs.existsSync(filePath)) {
       try {
         const dur = parseFloat(execSync(
@@ -451,7 +455,7 @@ if (HAS_FFMPEG) {
     }
   }
   fs.writeFileSync(
-    path.join(__dirname, 'audio/ep_durations.json'),
+    path.join(P.audio, 'ep_durations.json'),
     JSON.stringify(durations, null, 2),
     'utf-8'
   );

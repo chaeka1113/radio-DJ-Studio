@@ -10,26 +10,15 @@
  */
 import Anthropic from '@anthropic-ai/sdk';
 import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { loadEnv, requireEnv } from './lib/env.mjs';
+import { generateEpId, makePaths, ensureDirs } from './lib/paths.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+loadEnv();
+const epId = process.env.EP_ID ?? generateEpId();
+const P    = makePaths(epId);
+ensureDirs(P);
 
-// ── .env 로드 ─────────────────────────────────────────────────────────────
-const envPath = path.join(__dirname, '../.env');
-if (fs.existsSync(envPath)) {
-  for (const line of fs.readFileSync(envPath, 'utf-8').split('\n')) {
-    const t = line.trim();
-    if (!t || t.startsWith('#')) continue;
-    const idx = t.indexOf('=');
-    if (idx === -1) continue;
-    const k = t.slice(0, idx).trim(), v = t.slice(idx + 1).trim();
-    if (!process.env[k]) process.env[k] = v;
-  }
-}
-
-const API_KEY = process.env.ANTHROPIC_API_KEY;
-if (!API_KEY) { console.error('❌ ANTHROPIC_API_KEY 없음'); process.exit(1); }
+const API_KEY = requireEnv('ANTHROPIC_API_KEY');
 
 // ── RSS 피드 목록 ─────────────────────────────────────────────────────────
 const RSS_FEEDS = [
@@ -175,7 +164,7 @@ const output = {
 };
 
 fs.writeFileSync(
-  path.join(__dirname, '00_trends.json'),
+  P.trends,
   JSON.stringify(output, null, 2),
   'utf-8'
 );

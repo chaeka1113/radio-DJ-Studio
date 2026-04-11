@@ -1,27 +1,14 @@
 import Anthropic from '@anthropic-ai/sdk';
 import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { loadEnv, requireEnv } from './lib/env.mjs';
+import { generateEpId, makePaths, ensureDirs, updateStage } from './lib/paths.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+loadEnv();
+const epId = process.env.EP_ID ?? generateEpId();
+const P    = makePaths(epId);
+ensureDirs(P);
 
-// .env 로드 (루트 기준)
-const envPath = path.join(__dirname, '../.env');
-if (fs.existsSync(envPath)) {
-  const envContent = fs.readFileSync(envPath, 'utf-8');
-  for (const line of envContent.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const idx = trimmed.indexOf('=');
-    if (idx === -1) continue;
-    const key = trimmed.slice(0, idx).trim();
-    const val = trimmed.slice(idx + 1).trim();
-    if (!process.env[key]) process.env[key] = val;
-  }
-}
-
-const API_KEY = process.env.ANTHROPIC_API_KEY;
-if (!API_KEY) { console.error('❌ ANTHROPIC_API_KEY 없음'); process.exit(1); }
+const API_KEY = requireEnv('ANTHROPIC_API_KEY');
 
 const allArgs = process.argv.slice(2);
 const includeMz = allArgs.includes('--mz');
@@ -29,43 +16,38 @@ const topics = allArgs.filter(a => !a.startsWith('--'));
 if (topics.length < 3) { console.error('❌ 주제 3개 필요'); process.exit(1); }
 
 // MZ 모드: contract가 있으면 거기서 mzEpNum 읽기, 없으면 랜덤
-const contractPath = path.join(__dirname, 'ref_episode_contract.json');
-const contract = fs.existsSync(contractPath) ? JSON.parse(fs.readFileSync(contractPath, 'utf-8')) : null;
+const contract = fs.existsSync(P.epContract) ? JSON.parse(fs.readFileSync(P.epContract, 'utf-8')) : null;
 const mzEpNum = includeMz
   ? (contract?.mz_episode_id ?? Math.floor(Math.random() * 3) + 1)
   : null;
 if (includeMz) console.log(`🔥 MZ 모드 ON — EP${mzEpNum}를 10~30대 사연자로 설정`);
 
 // QA 피드백 로드 (재작업 시 이전 QA 피드백 주입)
-const feedbackPath = path.join(__dirname, '01_qa_feedback.json');
-const qaFeedback = fs.existsSync(feedbackPath)
-  ? JSON.parse(fs.readFileSync(feedbackPath, 'utf-8'))
+const qaFeedback = fs.existsSync(P.qaFeedback)
+  ? JSON.parse(fs.readFileSync(P.qaFeedback, 'utf-8'))
   : null;
 if (qaFeedback) console.log('🔄 [재작업] QA 피드백 감지 — 수정 지시 반영');
 
 // ── 규칙 주입 ──────────────────────────────────────────────────────────────────
-const referenceKnowledge = fs.readFileSync(path.join(__dirname, '../.claude/skills/ref_script_rules.md'), 'utf-8');
-const scriptRubric = fs.readFileSync(path.join(__dirname, '../.claude/skills/ref_script_rubric.md'), 'utf-8');
+const referenceKnowledge = fs.readFileSync(P.refScript, 'utf-8');
+const scriptRubric = fs.readFileSync(P.refScriptRubric, 'utf-8');
 
 // ── 영구 오답 노트 로드 (존재할 때만) ────────────────────────────────────────
-const learningsPath = path.join(__dirname, '../.claude/skills/ref_learnings.md');
-const pastLearnings = fs.existsSync(learningsPath) ? fs.readFileSync(learningsPath, 'utf-8') : null;
+const pastLearnings = fs.existsSync(P.learnings) ? fs.readFileSync(P.learnings, 'utf-8') : null;
 if (pastLearnings) console.log('🧠 [Learnings] 과거 실수 모음 주입 완료');
 
 // ── 전역 상태 초기화 ───────────────────────────────────────────────────────────
 console.log('🗑  이전 작업물 초기화 중...');
-const JSON_FILES = [
-  '01_scripts.json', '02_dj_script.json', '03_character_prompts.json',
-  '04_storyboard.json', '05_image_results.json', '06_video_results.json',
-  '08_qa_script.json',
+const STALE_FILES = [
+  P.scripts, P.djScript, P.characterPrompts,
+  P.storyboard, P.storyboardSummary, P.imageResults,
+  P.qaScript,
 ];
-for (const f of JSON_FILES) {
-  const p = path.join(__dirname, f);
-  if (fs.existsSync(p)) { fs.rmSync(p); console.log(`   삭제: ${f}`); }
+for (const fp of STALE_FILES) {
+  if (fs.existsSync(fp)) { fs.rmSync(fp); console.log(`   삭제: ${fp.split('/').pop()}`); }
 }
-for (const d of ['images', 'videos']) {
-  const p = path.join(__dirname, d);
-  if (fs.existsSync(p)) { fs.rmSync(p, { recursive: true, force: true }); console.log(`   폴더 삭제: ${d}/`); }
+for (const d of [P.images, P.videos]) {
+  if (fs.existsSync(d)) { fs.rmSync(d, { recursive: true, force: true }); console.log(`   폴더 삭제: ${d.split('/').pop()}/`); }
 }
 console.log('✅ 초기화 완료\n');
 
@@ -265,7 +247,8 @@ EP${epNum}: ${contractParts}
 
 const data = { episodes };
 
-fs.writeFileSync(path.join(__dirname, '01_scripts.json'), JSON.stringify(data, null, 2), 'utf-8');
+fs.writeFileSync(P.scripts, JSON.stringify(data, null, 2), 'utf-8');
+updateStage(P, 'scripted');
 
 console.log('\n✅ 대본 생성 완료');
 data.episodes.forEach(ep => {

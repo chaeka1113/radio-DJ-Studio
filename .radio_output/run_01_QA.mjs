@@ -15,47 +15,35 @@
  */
 import Anthropic from '@anthropic-ai/sdk';
 import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { loadEnv, requireEnv } from './lib/env.mjs';
+import { generateEpId, makePaths, ensureDirs } from './lib/paths.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-// .env 로드
-const envPath = path.join(__dirname, '../.env');
-if (fs.existsSync(envPath)) {
-  for (const line of fs.readFileSync(envPath, 'utf-8').split('\n')) {
-    const t = line.trim();
-    if (!t || t.startsWith('#')) continue;
-    const idx = t.indexOf('=');
-    if (idx === -1) continue;
-    const k = t.slice(0, idx).trim(), v = t.slice(idx + 1).trim();
-    if (!process.env[k]) process.env[k] = v;
-  }
-}
+loadEnv();
+const epId = process.env.EP_ID ?? generateEpId();
+const P    = makePaths(epId);
+ensureDirs(P);
 
 // ── IIFE로 감싸서 early return이 가능하게 → 자연 종료 보장 ──────────────────
 (async () => {
 
   const API_KEY = process.env.ANTHROPIC_API_KEY;
-  const scriptsPath = path.join(__dirname, '01_scripts.json');
-  const contractPath = path.join(__dirname, 'ref_episode_contract.json');
 
   // ── 필수 파일 체크 ─────────────────────────────────────────────────────────
-  if (!fs.existsSync(scriptsPath)) {
+  if (!fs.existsSync(P.scripts)) {
     console.error('❌ 01_scripts.json 없음');
     process.exitCode = 1;
     return;
   }
-  if (!fs.existsSync(contractPath)) {
+  if (!fs.existsSync(P.epContract)) {
     console.warn('⚠️ ref_episode_contract.json 없음 — QA 스킵 (Pass 처리)');
     const r = { verdict: 'Pass', score: 100, skipped: true, feedback: [], episodes: [], summary: '계약서 없음 — 스킵' };
-    fs.writeFileSync(path.join(__dirname, '01_qa_result.json'), JSON.stringify(r, null, 2));
+    fs.writeFileSync(P.qaResult, JSON.stringify(r, null, 2));
     process.exitCode = 0;
     return;
   }
 
-  const scripts  = JSON.parse(fs.readFileSync(scriptsPath,  'utf-8'));
-  const contract = JSON.parse(fs.readFileSync(contractPath, 'utf-8'));
+  const scripts  = JSON.parse(fs.readFileSync(P.scripts,    'utf-8'));
+  const contract = JSON.parse(fs.readFileSync(P.epContract, 'utf-8'));
 
   console.log('🔍 [QA Stage 1] 프로그래매틱 검증 중...');
 
@@ -119,7 +107,7 @@ if (fs.existsSync(envPath)) {
       feedback: feedbacks,
       summary:  `Stage1 Fail — ${failEps.map(r => `EP${r.id}(${r.issues.length}건)`).join(', ')}`,
     };
-    fs.writeFileSync(path.join(__dirname, '01_qa_result.json'), JSON.stringify(result, null, 2), 'utf-8');
+    fs.writeFileSync(P.qaResult, JSON.stringify(result, null, 2), 'utf-8');
     console.log(`❌ [QA Stage 1] Fail — ${result.summary}`);
     feedbacks.forEach(f => console.log(`   ⚠️ ${f}`));
     process.exitCode = 1;
@@ -134,7 +122,7 @@ if (fs.existsSync(envPath)) {
   console.log('📊 [QA Stage 2] 가중치 루브릭 채점 중 (LLM)...');
 
   // rubric 파일 로드
-  const rubricPath = path.join(__dirname, '../.claude/skills/ref_script_rubric.md');
+  const rubricPath = P.refScriptRubric;
   const rubricText = fs.existsSync(rubricPath)
     ? fs.readFileSync(rubricPath, 'utf-8')
     : '';
@@ -258,11 +246,11 @@ ${r.script || '(없음)'}
       : `Fail: ${finalEps.filter(e => !e.pass).map(e => `EP${e.id}(${e.rubric_score}점)`).join(', ')}`,
   };
 
-  fs.writeFileSync(path.join(__dirname, '01_qa_result.json'), JSON.stringify(qaResult, null, 2), 'utf-8');
+  fs.writeFileSync(P.qaResult, JSON.stringify(qaResult, null, 2), 'utf-8');
 
   if (verdict === 'Pass') {
     console.log(`✅ [QA] Pass (${avgRubricScore}/100) — ${qaResult.summary}`);
-    const fbPath = path.join(__dirname, '01_qa_feedback.json');
+    const fbPath = P.qaFeedback;
     if (fs.existsSync(fbPath)) fs.unlinkSync(fbPath);
     process.exitCode = 0;
   } else {
@@ -284,7 +272,7 @@ ${r.script || '(없음)'}
       })),
       summary: qaResult.summary,
     };
-    fs.writeFileSync(path.join(__dirname, '01_qa_feedback.json'), JSON.stringify(feedbackPayload, null, 2), 'utf-8');
+    fs.writeFileSync(P.qaFeedback, JSON.stringify(feedbackPayload, null, 2), 'utf-8');
     console.log('   📝 01_qa_feedback.json 저장 완료 (재작업 시 프롬프트에 주입됨)');
     process.exitCode = 1;
   }
