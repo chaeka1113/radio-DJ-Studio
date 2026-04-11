@@ -22,6 +22,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import fs from 'fs';
 import { loadEnv } from './lib/env.mjs';
 import { generateEpId, makePaths, ensureDirs } from './lib/paths.mjs';
+import { withRetry } from './lib/retry.mjs';
 
 loadEnv();
 const epId = process.env.EP_ID ?? generateEpId();
@@ -85,25 +86,6 @@ const MIDJOURNEY_PARAM_RE = /--\w[\w:]+(\s+[\w.:]+)?/g;
     },
   });
 
-  // ── 지수 백오프 재시도 헬퍼 ──────────────────────────────────────────────
-  async function withRetry(fn, label, maxRetries = 3) {
-    const delays = [5000, 15000, 30000];
-    for (let i = 0; i <= maxRetries; i++) {
-      try {
-        return await fn();
-      } catch (err) {
-        const is429 = err.message?.includes('429') || err.message?.toLowerCase().includes('quota');
-        const is503 = err.message?.includes('503') || err.message?.toLowerCase().includes('unavailable');
-        if (i < maxRetries && (is429 || is503)) {
-          const wait = is429 ? delays[i] * 2 : delays[i];
-          console.warn(`   ⚠️ [${label}] ${is429 ? '429 쿼터' : '503 과부하'} — ${wait / 1000}초 후 재시도 (${i + 1}/${maxRetries})...`);
-          await new Promise(r => setTimeout(r, wait));
-        } else {
-          throw err;
-        }
-      }
-    }
-  }
 
   // ── 씬 채점 프롬프트 ────────────────────────────────────────────────────
   function buildScoringPrompt(sceneId, sceneType, visualPrompt, negativePrompt) {

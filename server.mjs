@@ -6,27 +6,50 @@ import fs from 'fs';
 import https from 'https';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { generateEpId, makePaths, ensureDirs } from './.radio_output/lib/paths.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const RADIO_DIR = path.join(__dirname, '.radio_output');
-const IMAGES_DIR = path.join(RADIO_DIR, 'images');
-const API_KEY = process.env.GEMINI_API_KEY;
+const __dirname  = path.dirname(fileURLToPath(import.meta.url));
+const RADIO_DIR  = path.join(__dirname, '.radio_output');  // scripts live here (cwd)
+const OUTPUT_DIR = path.join(__dirname, '.output');        // episode artifacts live here
+const API_KEY    = process.env.GEMINI_API_KEY;
+
+/** Active episode ID — set once per pipeline run in /api/generate-scripts */
+let currentEpId = null;
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/output', express.static(RADIO_DIR));
+app.use('/output', express.static(OUTPUT_DIR));
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+/** Returns path map for the active episode (creates a temp EP_ID if none is set). */
+function getP() {
+  if (!currentEpId) currentEpId = generateEpId();
+  return makePaths(currentEpId);
+}
+
 function readJson(filename) {
-  const p = path.join(RADIO_DIR, filename);
+  const P = getP();
+  const fileMap = {
+    '01_scripts.json':       P.scripts,
+    '02_dj_script.json':     P.djScript,
+    '04_storyboard.json':    P.storyboard,
+    '05_image_results.json': P.imageResults,
+  };
+  const p = fileMap[filename] ?? path.join(P.base, filename);
   if (!fs.existsSync(p)) return null;
   return JSON.parse(fs.readFileSync(p, 'utf-8'));
 }
 
 function writeJson(filename, data) {
-  fs.writeFileSync(path.join(RADIO_DIR, filename), JSON.stringify(data, null, 2), 'utf-8');
+  const P = getP();
+  const fileMap = {
+    '01_scripts.json':   P.scripts,
+    '02_dj_script.json': P.djScript,
+  };
+  const p = fileMap[filename] ?? path.join(P.base, filename);
+  fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf-8');
 }
 
 function sseStream(res) {
@@ -35,8 +58,8 @@ function sseStream(res) {
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
   return {
-    log: (msg) => res.write(`data: ${JSON.stringify({ type: 'log', message: msg })}\n\n`),
-    err: (msg) => res.write(`data: ${JSON.stringify({ type: 'error', message: msg })}\n\n`),
+    log:  (msg)      => res.write(`data: ${JSON.stringify({ type: 'log',   message: msg })}\n\n`),
+    err:  (msg)      => res.write(`data: ${JSON.stringify({ type: 'error', message: msg })}\n\n`),
     done: (code = 0) => { res.write(`data: ${JSON.stringify({ type: 'done', code })}\n\n`); res.end(); },
   };
 }
@@ -45,7 +68,13 @@ function runScript(sse, scriptName, args = []) {
   return new Promise((resolve) => {
     const child = spawn('node', [scriptName, ...args], {
       cwd: RADIO_DIR,
-      env: { ...process.env, GEMINI_API_KEY: API_KEY, ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY, ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY },
+      env: {
+        ...process.env,
+        EP_ID:              currentEpId,
+        GEMINI_API_KEY:     API_KEY,
+        ANTHROPIC_API_KEY:  process.env.ANTHROPIC_API_KEY,
+        ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY,
+      },
     });
     child.stdout.on('data', (d) => d.toString().split('\n').filter(Boolean).forEach(l => sse.log(l)));
     child.stderr.on('data', (d) => d.toString().split('\n').filter(Boolean).forEach(l => sse.err(l)));
@@ -60,6 +89,12 @@ app.post('/api/generate-scripts', async (req, res) => {
   const { topics, includeMz, includeQna, autoTrend } = req.body;
   const sse = sseStream(res);
 
+  // 새 파이프라인 실행마다 새 EP_ID 발급
+  currentEpId = generateEpId();
+  const P = makePaths(currentEpId);
+  ensureDirs(P);
+  sse.log(`📁 EP_ID: ${currentEpId}`);
+
   // autoTrend 모드: run_00_trend_fetcher.mjs 실행 후 stdout에서 주제 파싱
   let finalTopics = topics;
   if (autoTrend) {
@@ -68,7 +103,11 @@ app.post('/api/generate-scripts', async (req, res) => {
       let found = null;
       const child = spawn('node', ['run_00_trend_fetcher.mjs'], {
         cwd: RADIO_DIR,
-        env: { ...process.env, ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY },
+        env: {
+          ...process.env,
+          EP_ID:             currentEpId,
+          ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+        },
       });
       child.stdout.on('data', (d) => {
         const lines = d.toString().split('\n').filter(Boolean);
@@ -121,35 +160,7 @@ app.post('/api/generate-scripts', async (req, res) => {
     if (!finalTopics || finalTopics.length < 3) return res.status(400).json({ error: '주제 3개 필요' });
   }
 
-  // PATCH 1: 이전 결과 파일 삭제 (캐시/동기화 문제 방지)
-  const outputJsonFiles = [
-    '01_scripts.json', '02_dj_script.json', '03_character_prompts.json',
-    'ref_character_sheet.json', '04_storyboard.json', '05_image_results.json',
-    '06_video_results.json', '08_qa_script.json',
-  ];
-  for (const f of outputJsonFiles) {
-    const fp = path.join(RADIO_DIR, f);
-    try {
-      if (fs.existsSync(fp)) { fs.unlinkSync(fp); sse.log(`🗑 삭제: ${f}`); }
-    } catch (e) { sse.log(`⚠️ 삭제 실패: ${f} — ${e.message}`); }
-  }
-  const ttsTxtPath = path.join(RADIO_DIR, 'final_script_for_tts.txt');
-  try {
-    if (fs.existsSync(ttsTxtPath)) { fs.unlinkSync(ttsTxtPath); sse.log('🗑 삭제: final_script_for_tts.txt'); }
-  } catch (e) { sse.log(`⚠️ 삭제 실패: final_script_for_tts.txt — ${e.message}`); }
-  const audioDir = path.join(RADIO_DIR, 'audio');
-  try {
-    if (fs.existsSync(audioDir)) {
-      for (const f of fs.readdirSync(audioDir)) {
-        if (f.startsWith('chunk_') && f.endsWith('.mp3')) {
-          fs.unlinkSync(path.join(audioDir, f));
-          sse.log(`🗑 삭제: audio/${f}`);
-        }
-      }
-    }
-  } catch (e) { sse.log(`⚠️ audio/ 삭제 실패 — ${e.message}`); }
-
-  // PATCH 3: MZ 플래그 로그
+  // MZ 플래그 로그
   sse.log('🔥 MZ 플래그: ' + (includeMz ? 'ON' : 'OFF'));
 
   const pipelineArgs = [...finalTopics.slice(0, 3), ...(includeMz ? ['--mz'] : []), ...(includeQna ? ['--qna'] : [])];
@@ -167,17 +178,22 @@ app.post('/api/generate-scripts', async (req, res) => {
     const scriptCode = await runScript(sse, 'run_01_script.mjs', pipelineArgs);
     if (scriptCode !== 0) return sse.done(scriptCode);
 
-    sse.log(`🔍 [QA] 대본 검증 중 (시도 ${attempt}/3)...`);
-    const qaCode = await runScript(sse, 'run_01_QA.mjs');
+    // 진단: QA 직전 스크립트 파일 존재 확인
+    sse.log(`[DEBUG] P.scripts = ${P.scripts}`);
+    sse.log(`[DEBUG] exists = ${fs.existsSync(P.scripts)}`);
 
-    const qaResultPath = path.join(RADIO_DIR, '01_qa_result.json');
-    if (!fs.existsSync(qaResultPath)) {
+    sse.log(`🔍 [QA] 대본 검증 중 (시도 ${attempt}/3)...`);
+    // 이전 시도의 stale qaResult 제거 — QA가 조기 종료해도 오래된 결과를 읽지 않도록
+    if (fs.existsSync(P.qaResult)) fs.unlinkSync(P.qaResult);
+    await runScript(sse, 'run_01_QA.mjs');
+
+    if (!fs.existsSync(P.qaResult)) {
       sse.log('⚠️ QA 결과 파일 없음 — Pass 처리');
       qaPass = true;
       break;
     }
-    const qaResult = JSON.parse(fs.readFileSync(qaResultPath, 'utf-8'));
-    const qaScore = typeof qaResult.score === 'number' ? qaResult.score : 100;
+    const qaResult = JSON.parse(fs.readFileSync(P.qaResult, 'utf-8'));
+    const qaScore  = typeof qaResult.score === 'number' ? qaResult.score : 100;
     const qaFailed = qaResult.verdict !== 'Pass' || qaScore < 85;
 
     if (!qaFailed) {
@@ -186,23 +202,18 @@ app.post('/api/generate-scripts', async (req, res) => {
       break;
     } else {
       sse.log(`❌ [QA] Fail (${qaScore}/100, 커트라인 85) — ${qaResult.summary ?? ''}`);
-      // feedback 배열 (EP별 요약)
       (qaResult.feedback || []).forEach(f => sse.log(`   ⚠️ ${f}`));
-      // actionable_feedback: 신규 루브릭 채점에서 에피소드별 수정 지시 추출
       (qaResult.episodes || [])
         .filter(e => !e.pass)
         .forEach(e => {
           (e.actionable_feedback || []).forEach(af => sse.log(`   🔧 EP${e.id}: ${af}`));
         });
       if (attempt < 3) {
-        // run_01_QA.mjs가 이미 01_qa_feedback.json을 올바른 형식으로 작성함.
-        // 여기서 덮어쓰지 않는다 — run_01_script.mjs가 그 파일을 직접 읽어 주입.
-        const fbPath = path.join(RADIO_DIR, '01_qa_feedback.json');
-        if (fs.existsSync(fbPath)) {
+        if (fs.existsSync(P.qaFeedback)) {
           sse.log(`🔄 [Loop] QA 피드백 확인 완료 → 재작업 시작 (${attempt + 1}/3)`);
         } else {
-          // QA가 feedback 파일을 못 썼을 경우 fallback: qaResult로 직접 생성
-          fs.writeFileSync(fbPath, JSON.stringify({
+          // QA가 feedback 파일을 못 썼을 경우 fallback
+          fs.writeFileSync(P.qaFeedback, JSON.stringify({
             verdict: 'Fail',
             score: qaScore,
             cutline: 85,
@@ -223,11 +234,9 @@ app.post('/api/generate-scripts', async (req, res) => {
   }
   if (!qaPass) sse.log('⚠️ [QA] 최대 재시도 초과 — 현재 대본으로 진행합니다');
 
-  // WRAPUP: QA 실패 사유를 오답 노트에 압축 기록 (실패/성공 무관 항상 실행)
-  // 실패 사유가 없으면 wrapup 자체에서 no-op 처리
+  // WRAPUP: QA 실패 사유를 오답 노트에 압축 기록
   sse.log('🧠 [Wrapup] 오답 노트 압축 중...');
   await runScript(sse, 'run_99_wrapup.mjs');
-  // wrapup 실패(exit code != 0)여도 파이프라인은 계속 진행
 
   sse.done(0);
 });
@@ -235,7 +244,7 @@ app.post('/api/generate-scripts', async (req, res) => {
 // 02 DJ 멘트 생성
 app.post('/api/generate-dj', (req, res) => {
   const { includeQna } = req.body || {};
-  const sse = sseStream(res);
+  const sse  = sseStream(res);
   const args = [...(includeQna ? ['--qna'] : [])];
   runScript(sse, 'run_02_dj.mjs', args).then(code => sse.done(code));
 });
@@ -253,24 +262,24 @@ app.post('/api/generate-storyboard', async (req, res) => {
 
 // 05 이미지 생성
 app.post('/api/generate-images', (req, res) => {
-  const sse = sseStream(res);
+  const sse    = sseStream(res);
   const { force } = req.body || {};
-  if (force && fs.existsSync(IMAGES_DIR)) {
-    fs.rmSync(IMAGES_DIR, { recursive: true, force: true });
+  const P = getP();
+  if (force && fs.existsSync(P.images)) {
+    fs.rmSync(P.images, { recursive: true, force: true });
+    fs.mkdirSync(P.images, { recursive: true });
     sse.log('🗑 기존 이미지 폴더 삭제 완료 → 전체 재생성 시작');
   }
   runScript(sse, 'run_05_images.mjs').then(code => sse.done(code));
 });
 
 // 07 오디오 → (자동 연결) 08 켄 번스 → 10 최종 편집
-// ※ run_07_audio.mjs 완료 직후 영상 파이프라인 자동 실행
 app.post('/api/generate-audio-script', async (req, res) => {
   const sse = sseStream(res);
 
   const audioCode = await runScript(sse, 'run_07_audio.mjs');
   if (audioCode !== 0) return sse.done(audioCode);
 
-  // STEP 8: 켄 번스 영상 생성
   sse.log('🎬 [켄 번스] 씬별 영상 생성 중... (CPU만 사용, 시간 소요)');
   const kbCode = await runScript(sse, 'run_08_kenburns.mjs');
   if (kbCode !== 0) {
@@ -279,14 +288,13 @@ app.post('/api/generate-audio-script', async (req, res) => {
   }
   sse.log('✅ [켄 번스] 완료');
 
-  // STEP 9: 최종 영상 조립
   sse.log('🎞 [편집] 최종 영상 조립 중...');
   const editorCode = await runScript(sse, 'run_10_editor.mjs');
   if (editorCode !== 0) {
     sse.log('⚠️ [편집] 최종 영상 조립 실패');
     return sse.done(editorCode);
   }
-  sse.log('✅ [편집] 완료 — videos_final/ 에 결과물 저장됨');
+  sse.log('✅ [편집] 완료 — videos/ 에 결과물 저장됨');
 
   sse.done(0);
 });
@@ -309,7 +317,11 @@ app.post('/api/regenerate-image', async (req, res) => {
   const { scene_id } = req.body;
   if (!scene_id) return res.status(400).json({ error: 'scene_id 필요' });
 
-  const storyboard = readJson('04_storyboard.json');
+  const P = getP();
+  const storyboard = (() => {
+    if (!fs.existsSync(P.storyboard)) return null;
+    return JSON.parse(fs.readFileSync(P.storyboard, 'utf-8'));
+  })();
   if (!storyboard) return res.status(404).json({ error: '스토리보드 없음' });
 
   const scenes = storyboard.scenes
@@ -318,12 +330,12 @@ app.post('/api/regenerate-image', async (req, res) => {
   const scene = scenes.find(s => s.scene_id === scene_id);
   if (!scene) return res.status(404).json({ error: `씬 ${scene_id} 없음` });
 
-  const STYLE = ' Showa retro anime illustration, Studio Ghibli warm color palette, warm amber cinematic lighting, masterpiece, best quality, highly detailed, 8k, 16:9.';
-  const FALLBACK_NEGATIVE = 'photorealistic, 3d render, realistic, photography, highly detailed skin, cyberpunk, transformer, modern style, neon colors, glossy texture, plastic texture, abstract, moles, beauty marks, glasses, spectacles, nsfw, blurry, watermark, western features';
-  const prompt = scene.visual_prompt_en + STYLE;
-  const negativePrompt = scene.negative_prompt || FALLBACK_NEGATIVE;
-  const body = JSON.stringify({
-    instances: [{ prompt }],
+  const STYLE           = ' Showa retro anime illustration, Studio Ghibli warm color palette, warm amber cinematic lighting, masterpiece, best quality, highly detailed, 8k, 16:9.';
+  const FALLBACK_NEG    = 'photorealistic, 3d render, realistic, photography, highly detailed skin, cyberpunk, transformer, modern style, neon colors, glossy texture, plastic texture, abstract, moles, beauty marks, glasses, spectacles, nsfw, blurry, watermark, western features';
+  const prompt          = scene.visual_prompt_en + STYLE;
+  const negativePrompt  = scene.negative_prompt || FALLBACK_NEG;
+  const body            = JSON.stringify({
+    instances:  [{ prompt }],
     parameters: { sampleCount: 1, aspectRatio: '16:9', safetyFilterLevel: 'BLOCK_ONLY_HIGH', personGeneration: 'ALLOW_ALL', negativePrompt },
   });
 
@@ -331,9 +343,9 @@ app.post('/api/regenerate-image', async (req, res) => {
     const b64 = await new Promise((resolve, reject) => {
       const opts = {
         hostname: 'generativelanguage.googleapis.com',
-        path: `/v1beta/models/imagen-4.0-generate-001:predict?key=${API_KEY}`,
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+        path:     `/v1beta/models/imagen-4.0-generate-001:predict?key=${API_KEY}`,
+        method:   'POST',
+        headers:  { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
       };
       const r = https.request(opts, (resp) => {
         let data = '';
@@ -341,7 +353,7 @@ app.post('/api/regenerate-image', async (req, res) => {
         resp.on('end', () => {
           if (resp.statusCode !== 200) { reject(new Error(`HTTP ${resp.statusCode}: ${data.slice(0, 200)}`)); return; }
           const json = JSON.parse(data);
-          const b64 = json.predictions?.[0]?.bytesBase64Encoded;
+          const b64  = json.predictions?.[0]?.bytesBase64Encoded;
           b64 ? resolve(b64) : reject(new Error('이미지 데이터 없음'));
         });
       });
@@ -350,9 +362,9 @@ app.post('/api/regenerate-image', async (req, res) => {
       r.end();
     });
 
-    if (!fs.existsSync(IMAGES_DIR)) fs.mkdirSync(IMAGES_DIR, { recursive: true });
-    fs.writeFileSync(path.join(IMAGES_DIR, `${scene_id}.png`), Buffer.from(b64, 'base64'));
-    res.json({ success: true, scene_id, url: `/output/images/${scene_id}.png?t=${Date.now()}` });
+    fs.mkdirSync(P.images, { recursive: true });
+    fs.writeFileSync(path.join(P.images, `${scene_id}.png`), Buffer.from(b64, 'base64'));
+    res.json({ success: true, scene_id, url: `/output/${currentEpId}/images/${scene_id}.png?t=${Date.now()}` });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -378,7 +390,7 @@ async function geminiWithRetry(fn) {
 
 app.post('/api/translate', async (req, res) => {
   const { text } = req.body;
-  if (!text) return res.status(400).json({ error: 'text 필요' });
+  if (!text)    return res.status(400).json({ error: 'text 필요' });
   if (!API_KEY) return res.status(500).json({ error: 'GEMINI_API_KEY 없음' });
   try {
     const genAI = new GoogleGenerativeAI(API_KEY);
@@ -397,6 +409,10 @@ app.post('/api/translate', async (req, res) => {
 
 // ─── 데이터 읽기 ─────────────────────────────────────────────────────────────
 
+app.get('/api/current-ep', (req, res) => {
+  res.json({ ep_id: currentEpId });
+});
+
 app.get('/api/data/scripts', (req, res) => {
   const d = readJson('01_scripts.json');
   d ? res.json(d) : res.status(404).json({ error: '파일 없음' });
@@ -406,7 +422,7 @@ app.get('/api/data/dj', (req, res) => {
   d ? res.json(d) : res.status(404).json({ error: '파일 없음' });
 });
 app.get('/api/data/audio', (req, res) => {
-  const p = path.join(RADIO_DIR, 'final_script_for_tts.txt');
+  const p = getP().finalTtsScript;
   fs.existsSync(p) ? res.send(fs.readFileSync(p, 'utf-8')) : res.status(404).json({ error: '파일 없음' });
 });
 app.get('/api/data/images', (req, res) => {
@@ -429,7 +445,7 @@ app.put('/api/data/dj', (req, res) => {
   res.json({ success: true });
 });
 app.put('/api/data/audio', (req, res) => {
-  fs.writeFileSync(path.join(RADIO_DIR, 'final_script_for_tts.txt'), req.body.text, 'utf-8');
+  fs.writeFileSync(getP().finalTtsScript, req.body.text, 'utf-8');
   res.json({ success: true });
 });
 

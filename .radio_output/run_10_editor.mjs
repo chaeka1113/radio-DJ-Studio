@@ -2,7 +2,7 @@
  * run_10_editor.mjs — 최종 영상 조립 (켄 번스 씬 + TTS 오디오 + 라디오 UI)
  *
  * EP별 씬 concat → 오디오와 길이 비교 (루핑 여부 결정) → 파형+UI 오버레이 합성
- * → videos_final/ep{N}_final.mp4 × 3 → full_broadcast.mp4
+ * → .output/{EP_ID}/videos_final/ep{N}_final.mp4 × 3 → full_broadcast.mp4
  *
  * 유튜브 최적화:
  *   -crf 18          고품질 (18~23 권장, 낮을수록 고품질)
@@ -15,16 +15,23 @@ import { spawn } from 'child_process';
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { loadEnv } from './lib/env.mjs';
+import { generateEpId, makePaths, ensureDirs } from './lib/paths.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+loadEnv();
+const epId = process.env.EP_ID ?? generateEpId();
+const P    = makePaths(epId);
+ensureDirs(P);
+
+const videosKb    = path.join(P.base, 'videos_kb');
+const videosFinal = path.join(P.base, 'videos_final');
 
 // ── 공통 FFmpeg 헬퍼 ────────────────────────────────────────────────────────
 // exec 전면 금지 — 버퍼 오버플로우 크래시 방지
 // stderr 반드시 소비 — 소비 안 하면 파이프 막혀서 프로세스 멈춤
-function runFFmpeg(args, cwd) {
+function runFFmpeg(args) {
   return new Promise((resolve, reject) => {
-    const child = spawn('ffmpeg', args, { cwd });
+    const child = spawn('ffmpeg', args);
     child.stderr.on('data', () => {});
     child.on('close', (code) => {
       code === 0 ? resolve() : reject(new Error(`FFmpeg exit code: ${code}`));
@@ -37,7 +44,7 @@ function runFFmpeg(args, cwd) {
 (async () => {
 
   // ── 사전 체크: ep_durations.json ─────────────────────────────────────────
-  const durPath = path.join(__dirname, 'audio/ep_durations.json');
+  const durPath = path.join(P.audio, 'ep_durations.json');
   if (!fs.existsSync(durPath)) {
     console.error('❌ ep_durations.json 없음 — run_07_audio.mjs를 먼저 실행하세요');
     process.exitCode = 1;
@@ -46,18 +53,16 @@ function runFFmpeg(args, cwd) {
   const epDurations = JSON.parse(fs.readFileSync(durPath, 'utf-8'));
 
   // ── 사전 체크: storyboard ────────────────────────────────────────────────
-  const storyboardPath = path.join(__dirname, '04_storyboard.json');
-  if (!fs.existsSync(storyboardPath)) {
+  if (!fs.existsSync(P.storyboard)) {
     console.error('❌ 04_storyboard.json 없음 — run_04_storyboard.mjs를 먼저 실행하세요');
     process.exitCode = 1;
     return;
   }
-  const storyboard = JSON.parse(fs.readFileSync(storyboardPath, 'utf-8'));
+  const storyboard = JSON.parse(fs.readFileSync(P.storyboard, 'utf-8'));
   const scenes = storyboard.scenes || [];
 
   // ── 출력 디렉토리 생성 ────────────────────────────────────────────────────
-  const finalDir = path.join(__dirname, 'videos_final');
-  if (!fs.existsSync(finalDir)) fs.mkdirSync(finalDir, { recursive: true });
+  fs.mkdirSync(videosFinal, { recursive: true });
 
   // ── 폰트 설정 (Windows/Mac/Linux 분기) ──────────────────────────────────
   // Windows drawtext fontfile 경로: 드라이브 콜론을 \\: 로 이스케이프
@@ -87,7 +92,7 @@ function runFFmpeg(args, cwd) {
   // ── EP별 처리 ────────────────────────────────────────────────────────────
   for (let epIdx = 1; epIdx <= 3; epIdx++) {
     const epKey = `ep${epIdx}`;
-    const audioDur = epDurations[`${epKey}_script_sec`];
+    const audioDur  = epDurations[`${epKey}_script_sec`];
     const audioFile = epDurations[`${epKey}_audio_path`];
 
     if (!audioDur || !audioFile) {
@@ -106,45 +111,42 @@ function runFFmpeg(args, cwd) {
 
     // 켄 번스 영상이 있는 씬만 포함
     const validScenes = epScenes.filter(s =>
-      fs.existsSync(path.join(__dirname, 'videos_kb', `${s.scene_id}.mp4`))
+      fs.existsSync(path.join(videosKb, `${s.scene_id}.mp4`))
     );
     if (validScenes.length === 0) {
       console.error(`❌ EP${epIdx} 켄 번스 영상 없음 — run_08_kenburns.mjs를 먼저 실행하세요`);
       continue;
     }
 
-    // ── 2. list.txt 생성 ─────────────────────────────────────────────────
-    // 경로: 역슬래시 → 슬래시, 작은따옴표로 감싸기
-    // FFmpeg concat demuxer: cwd=__dirname 기준 상대경로 사용
-    const listPath = path.join(__dirname, `ep${epIdx}_list.txt`);
+    // ── 2. list.txt 생성 (EP_ID 디렉토리 기준 절대 경로) ────────────────
+    const listPath = path.join(P.base, `ep${epIdx}_list.txt`);
     const listEntries = validScenes.map(s =>
-      `file '${`videos_kb/${s.scene_id}.mp4`.replace(/\\/g, '/')}'`
+      `file '${path.join(videosKb, `${s.scene_id}.mp4`).replace(/\\/g, '/')}'`
     );
     fs.writeFileSync(listPath, listEntries.join('\n'), 'utf-8');
     console.log(`   📋 ep${epIdx}_list.txt 생성 (${listEntries.length}개 씬)`);
 
     // ── 3. 씬 concat (copy 코덱, 중간 파일) ──────────────────────────────
-    const rawOutput = `scenes_ep${epIdx}_raw.mp4`;
+    const rawOutput = path.join(P.base, `scenes_ep${epIdx}_raw.mp4`);
     console.log(`   🔗 씬 concat 중...`);
     try {
       // -f concat -safe 0 반드시 포함
       await runFFmpeg([
         '-f', 'concat', '-safe', '0',
-        '-i', `ep${epIdx}_list.txt`,
+        '-i', listPath,
         '-c', 'copy',
         '-y', rawOutput,
-      ], __dirname);
+      ]);
     } catch (err) {
       console.error(`   ❌ EP${epIdx} concat 실패: ${err.message}`);
       continue;
     }
 
     // ── 4. 영상/오디오 길이 비교 ─────────────────────────────────────────
-    const rawFullPath = path.join(__dirname, rawOutput);
     // parseFloat + toString().trim() 필수 — 개행문자가 FFmpeg 수식 파서 고장 유발
     const videoDur = parseFloat(
       execSync(
-        `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${rawFullPath}"`
+        `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${rawOutput}"`
       ).toString().trim()
     );
     console.log(`   📐 영상: ${videoDur.toFixed(1)}초, 오디오: ${audioDur.toFixed(1)}초`);
@@ -178,13 +180,13 @@ function runFFmpeg(args, cwd) {
     // -vsync cfr: 루핑 경계 타임스탬프 드리프트 방지
     const syncArgs = needsLoop ? ['-vsync', 'cfr', '-shortest'] : ['-shortest'];
 
-    const finalOutput = `videos_final/ep${epIdx}_final.mp4`;
-    console.log(`   🎞 최종 합성 중... → ${finalOutput}`);
+    const finalOutput = path.join(videosFinal, `ep${epIdx}_final.mp4`);
+    console.log(`   🎞 최종 합성 중... → ep${epIdx}_final.mp4`);
 
     try {
       await runFFmpeg([
         ...videoInputArgs,
-        '-i', audioFile,        // ep_durations.json에서 읽은 경로 사용 (하드코딩 금지)
+        '-i', audioFile,        // ep_durations.json에서 읽은 절대 경로
         '-filter_complex', filterComplex,
         '-map', '[out]',
         '-map', '1:a',
@@ -197,7 +199,7 @@ function runFFmpeg(args, cwd) {
         '-pix_fmt', 'yuv420p',  // 범용 호환성
         '-movflags', '+faststart', // 유튜브 업로드 처리 최적화
         '-y', finalOutput,
-      ], __dirname);
+      ]);
 
       console.log(`   ✅ EP${epIdx} 완료 → ${finalOutput}`);
 
@@ -210,10 +212,10 @@ function runFFmpeg(args, cwd) {
   // -c copy 절대 금지 — 스트림 파라미터 불일치로 재생 끊김 발생
   console.log('\n🎞 full_broadcast.mp4 생성 중...');
 
-  const fullListPath = path.join(__dirname, 'full_list.txt');
+  const fullListPath = path.join(P.base, 'full_list.txt');
   const fullEntries = [1, 2, 3]
-    .filter(n => fs.existsSync(path.join(__dirname, `videos_final/ep${n}_final.mp4`)))
-    .map(n => `file '${`videos_final/ep${n}_final.mp4`.replace(/\\/g, '/')}'`);
+    .filter(n => fs.existsSync(path.join(videosFinal, `ep${n}_final.mp4`)))
+    .map(n => `file '${path.join(videosFinal, `ep${n}_final.mp4`).replace(/\\/g, '/')}'`);
 
   if (fullEntries.length === 0) {
     console.error('❌ ep_final.mp4 파일이 없어 full_broadcast 생성 불가');
@@ -223,10 +225,11 @@ function runFFmpeg(args, cwd) {
 
   fs.writeFileSync(fullListPath, fullEntries.join('\n'), 'utf-8');
 
+  const fullBroadcast = path.join(videosFinal, 'full_broadcast.mp4');
   try {
     await runFFmpeg([
       '-f', 'concat', '-safe', '0',
-      '-i', 'full_list.txt',
+      '-i', fullListPath,
       '-c:v', 'libx264',
       '-crf', '18',
       '-preset', 'slow',
@@ -234,8 +237,8 @@ function runFFmpeg(args, cwd) {
       '-ar', '44100',
       '-pix_fmt', 'yuv420p',
       '-movflags', '+faststart',
-      '-y', 'videos_final/full_broadcast.mp4',
-    ], __dirname);
+      '-y', fullBroadcast,
+    ]);
 
     console.log('✅ full_broadcast.mp4 생성 완료');
   } catch (err) {
@@ -245,7 +248,7 @@ function runFFmpeg(args, cwd) {
   }
 
   console.log('\n🎉 전체 영상 조립 완료!');
-  console.log('📁 .radio_output/videos_final/');
+  console.log(`📁 ${videosFinal}`);
   console.log('   ├── ep1_final.mp4');
   console.log('   ├── ep2_final.mp4');
   console.log('   ├── ep3_final.mp4');

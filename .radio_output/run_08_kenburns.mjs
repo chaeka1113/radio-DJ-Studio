@@ -2,7 +2,7 @@
  * run_08_kenburns.mjs — Ken Burns 씬별 영상 생성
  *
  * 04_storyboard.json의 씬 이미지에 씬 타입별 켄 번스 효과를 적용해
- * videos_kb/{scene_id}.mp4 로 저장한다.
+ * .output/{EP_ID}/videos_kb/{scene_id}.mp4 로 저장한다.
  * DJ_SHOT 타입은 건너뜀.
  *
  * 이미지 해상도 정규화: scale + force_original_aspect_ratio=increase
@@ -11,16 +11,22 @@
 import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { loadEnv } from './lib/env.mjs';
+import { generateEpId, makePaths, ensureDirs } from './lib/paths.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+loadEnv();
+const epId = process.env.EP_ID ?? generateEpId();
+const P    = makePaths(epId);
+ensureDirs(P);
+
+const videosKb = path.join(P.base, 'videos_kb');
 
 // ── 공통 FFmpeg 헬퍼 ────────────────────────────────────────────────────────
 // exec 전면 금지 — 버퍼 오버플로우 크래시 방지
 // stderr 반드시 소비 — 소비 안 하면 파이프 막혀서 프로세스 멈춤
-function runFFmpeg(args, cwd) {
+function runFFmpeg(args) {
   return new Promise((resolve, reject) => {
-    const child = spawn('ffmpeg', args, { cwd });
+    const child = spawn('ffmpeg', args);
     child.stderr.on('data', () => {});
     child.on('close', (code) => {
       code === 0 ? resolve() : reject(new Error(`FFmpeg exit code: ${code}`));
@@ -33,14 +39,13 @@ function runFFmpeg(args, cwd) {
 (async () => {
 
   // 사전 체크
-  const storyboardPath = path.join(__dirname, '04_storyboard.json');
-  if (!fs.existsSync(storyboardPath)) {
+  if (!fs.existsSync(P.storyboard)) {
     console.error('❌ 04_storyboard.json 없음 — run_04_storyboard.mjs를 먼저 실행하세요');
     process.exitCode = 1;
     return;
   }
 
-  const storyboard = JSON.parse(fs.readFileSync(storyboardPath, 'utf-8'));
+  const storyboard = JSON.parse(fs.readFileSync(P.storyboard, 'utf-8'));
   const scenes = storyboard.scenes || [];
 
   if (scenes.length === 0) {
@@ -50,8 +55,7 @@ function runFFmpeg(args, cwd) {
   }
 
   // 출력 디렉토리 생성
-  const kbDir = path.join(__dirname, 'videos_kb');
-  if (!fs.existsSync(kbDir)) fs.mkdirSync(kbDir, { recursive: true });
+  fs.mkdirSync(videosKb, { recursive: true });
 
   const results = [];
   let successCount = 0, skippedCount = 0, failedCount = 0;
@@ -62,9 +66,9 @@ function runFFmpeg(args, cwd) {
   for (let i = 0; i < scenes.length; i++) {
     const scene = scenes[i];
     const { scene_id, type, duration_sec } = scene;
-    const outputPath = path.join(__dirname, 'videos_kb', `${scene_id}.mp4`);
-    const imgPath = path.join(__dirname, 'images', `${scene_id}.png`);
-    const progress = `[${i + 1}/${total}]`;
+    const outputPath = path.join(videosKb, `${scene_id}.mp4`);
+    const imgPath    = path.join(P.images, `${scene_id}.png`);
+    const progress   = `[${i + 1}/${total}]`;
 
     // DJ_SHOT 스킵
     if (type === 'DJ_SHOT') {
@@ -121,19 +125,19 @@ function runFFmpeg(args, cwd) {
       filterStr = `scale=1920:1080:force_original_aspect_ratio=increase,zoompan=z='min(zoom+0.0006,1.08)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=1920x1080,fps=25`;
     }
 
-    // ── FFmpeg 실행 (await 순차 실행 — 동시 실행 금지) ─────────────────────
+    // ── FFmpeg 실행 (절대 경로 사용) ────────────────────────────────────────
     try {
       await runFFmpeg([
         '-y',
         '-loop', '1',
-        '-i', `images/${scene_id}.png`,
+        '-i', imgPath,
         '-vf', filterStr,
         '-t', String(duration),
         '-c:v', 'libx264',
         '-preset', 'fast',     // 중간 파일 → fast 충분
         '-pix_fmt', 'yuv420p',
-        `videos_kb/${scene_id}.mp4`,
-      ], __dirname);
+        outputPath,
+      ]);
 
       results.push({ scene_id, status: 'success', type });
       successCount++;
@@ -152,14 +156,10 @@ function runFFmpeg(args, cwd) {
     results,
     summary: { success: successCount, skipped: skippedCount, failed: failedCount },
   };
-  fs.writeFileSync(
-    path.join(__dirname, '08_kenburns_results.json'),
-    JSON.stringify(output, null, 2),
-    'utf-8'
-  );
+  fs.writeFileSync(P.kenburnsResults, JSON.stringify(output, null, 2), 'utf-8');
 
   console.log(`\n✅ 켄 번스 완료 — 성공: ${successCount}, 스킵: ${skippedCount}, 실패: ${failedCount}`);
-  console.log('📋 08_kenburns_results.json 저장 완료');
+  console.log(`📋 ${P.kenburnsResults}`);
 
   if (failedCount > 0) process.exitCode = 1;
 

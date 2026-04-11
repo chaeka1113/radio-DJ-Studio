@@ -2,6 +2,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import fs from 'fs';
 import { loadEnv, requireEnv } from './lib/env.mjs';
 import { generateEpId, makePaths, ensureDirs, updateStage } from './lib/paths.mjs';
+import { withRetry } from './lib/retry.mjs';
 
 loadEnv();
 const epId = process.env.EP_ID ?? generateEpId();
@@ -50,25 +51,6 @@ function getAgeAnchor(age) {
 }
 
 const STYLE_ANCHOR = '(Showa retro anime, Studio Ghibli style hand-drawn illustration),';
-
-async function withRetry(fn, label) {
-  const delays = [10000, 30000, 60000];
-  for (let i = 0; i <= delays.length; i++) {
-    try {
-      return await fn();
-    } catch (err) {
-      const is503 = err.message?.includes('503') || err.message?.toLowerCase().includes('unavailable') || err.message?.toLowerCase().includes('overloaded');
-      const is429 = err.message?.includes('429') || err.message?.toLowerCase().includes('quota') || err.message?.toLowerCase().includes('rate');
-      if (i < delays.length && (is503 || is429)) {
-        const wait = is429 ? delays[Math.min(i, delays.length - 1)] * 2 : delays[i];
-        console.warn(`   ⚠️ [${label}] ${is429 ? '429 쿼터' : '503 과부하'} — ${wait / 1000}초 후 재시도 (${i + 1}/${delays.length})...`);
-        await new Promise(r => setTimeout(r, wait));
-      } else {
-        throw err;
-      }
-    }
-  }
-}
 
 let sceneCounter = 1;
 const allScenes = [];
