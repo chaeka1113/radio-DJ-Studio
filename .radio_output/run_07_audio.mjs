@@ -3,6 +3,7 @@ import path from 'path';
 import https from 'https';
 import os from 'os';
 import { execFileSync, execSync } from 'child_process';
+import { fileURLToPath } from 'url';
 import { loadEnv } from './lib/env.mjs';
 import { generateEpId, makePaths, ensureDirs, updateStage } from './lib/paths.mjs';
 
@@ -10,6 +11,14 @@ loadEnv();
 const epId = process.env.EP_ID ?? generateEpId();
 const P    = makePaths(epId);
 ensureDirs(P);
+
+const __filename_audio = fileURLToPath(import.meta.url);
+const __dirname_audio  = path.dirname(__filename_audio);
+const historyPath      = path.join(__dirname_audio, 'ref_broadcast_history.json');
+
+// process.argv에서 --ep 파싱
+const epArgIdx = process.argv.indexOf('--ep');
+const EP_NUM   = epArgIdx !== -1 ? parseInt(process.argv[epArgIdx + 1]) : null;
 
 // ── 규칙 주입 (V3 가이드라인 우선 로드) ─────────────────────────────────────────
 const referenceKnowledge = fs.readFileSync(P.refTts, 'utf-8');
@@ -463,3 +472,85 @@ if (HAS_FFMPEG) {
 } else {
   console.log('⚠️ FFmpeg 없음 — ep_durations.json 생성 스킵');
 }
+
+// ── 방송 히스토리 업데이트 ────────────────────────────────────────────────────
+async function updateBroadcastHistory(epNum) {
+  if (!epNum || isNaN(epNum) || epNum < 1) {
+    console.log('🧪 테스트 모드 — 히스토리 저장 스킵');
+    return;
+  }
+
+  // 히스토리 파일 없으면 초기화
+  const defaultHistory = {
+    meta: { total_episodes: 0, last_updated: '' },
+    dj_character: { established_traits: [], running_gags: [] },
+    listeners: [],
+    episodes: [],
+  };
+
+  let history;
+  if (!fs.existsSync(historyPath)) {
+    history = defaultHistory;
+  } else {
+    history = JSON.parse(fs.readFileSync(historyPath, 'utf-8'));
+  }
+
+  // 이미 같은 EP 번호가 히스토리에 있으면 덮어쓰지 않고 경고
+  const alreadyExists = history.episodes.find(e => e.ep_num === epNum);
+  if (alreadyExists) {
+    console.log(`⚠️ EP${epNum} 히스토리가 이미 존재합니다. 저장 스킵.`);
+    return;
+  }
+
+  console.log(`📼 EP${epNum} 히스토리 저장 시작...`);
+
+  // 대본 데이터에서 청취자 정보 추출
+  const scripts = fs.existsSync(P.scripts) ? JSON.parse(fs.readFileSync(P.scripts, 'utf-8')) : null;
+  const today = new Date().toISOString().slice(0, 10);
+  const allKeywords = (scripts?.episodes || []).map(ep => ep.theme).filter(Boolean);
+
+  // 에피소드 요약
+  const epEntry = {
+    ep_num: epNum,
+    date: today,
+    keywords: allKeywords,
+    dj_highlights: djScript.episodes.map(ep =>
+      (ep.dj_reaction || '').split(/[。！？]/)[0]?.trim() || ''
+    ).filter(Boolean).join(' / '),
+    memorable_line: (() => {
+      const reaction = djScript.episodes[0]?.dj_reaction || '';
+      const sentences = reaction.split(/[。！？]/).map(s => s.trim()).filter(Boolean);
+      return sentences[Math.min(1, sentences.length - 1)] || '...';
+    })(),
+  };
+
+  // 청취자 정보 추가 / 재등장 시 last_appeared 갱신
+  const newListeners = (scripts?.episodes || []).map(ep => ({
+    name: ep.character?.name || '不明',
+    age: parseInt(ep.character?.age) || 60,
+    keywords: [ep.theme].filter(Boolean),
+    first_appeared: epNum,
+    last_appeared: epNum,
+    profile: ep.character?.personality_desc || '',
+    outcome: ep.character?.flaw_trigger || ep.character?.personality_desc || '',
+  }));
+
+  for (const newL of newListeners) {
+    const existing = history.listeners.find(l => l.name === newL.name);
+    if (existing) {
+      existing.last_appeared = epNum;
+    } else {
+      history.listeners.push(newL);
+    }
+  }
+
+  history.episodes.push(epEntry);
+  history.meta.total_episodes = history.episodes.length;
+  history.meta.last_updated = today;
+
+  fs.writeFileSync(historyPath, JSON.stringify(history, null, 2), 'utf-8');
+  console.log(`✅ EP${epNum} 히스토리 저장 완료 → ref_broadcast_history.json`);
+  console.log(`   총 누적 회차: ${history.meta.total_episodes}회`);
+}
+
+await updateBroadcastHistory(EP_NUM);

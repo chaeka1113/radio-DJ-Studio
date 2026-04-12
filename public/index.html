@@ -53,6 +53,21 @@
     <input id="topic3" type="text" placeholder="テーマ3 (예: ロマンス)" class="bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-amber-500">
     <span id="topic3-ko" class="text-xs text-amber-400 px-1 h-4"></span>
   </div>
+  <div class="flex items-center gap-2 pb-5">
+    <label class="text-xs text-gray-400 whitespace-nowrap">
+      EP 번호
+    </label>
+    <input
+      type="number"
+      id="epNumber"
+      min="1"
+      placeholder="테스트면 비워두세요"
+      class="w-32 px-2 py-1 rounded text-xs bg-gray-800
+             border border-gray-600 text-white
+             placeholder-gray-500 focus:outline-none
+             focus:border-amber-500"
+    />
+  </div>
   <div class="flex flex-col gap-1 pb-5">
     <button onclick="runFullPipeline()" class="bg-amber-500 hover:bg-amber-400 text-black font-bold px-4 py-1.5 rounded text-sm whitespace-nowrap transition-colors">
       🎙 全工程 生成
@@ -308,7 +323,8 @@ async function runFullPipeline(autoTrend = false) {
   const _includeMz = document.getElementById('includeMz').checked;
   const _includeQna = document.getElementById('includeQna').checked;
   if (_includeMz) appendLog('🔥 MZ 모드 체크됨 — --mz 플래그 전송 중', 'log');
-  let r = await streamStep('/api/generate-scripts', { topics, includeMz: _includeMz, includeQna: _includeQna, autoTrend });
+  const epNum = document.getElementById('epNumber').value.trim();
+  let r = await streamStep('/api/generate-scripts', { topics, includeMz: _includeMz, includeQna: _includeQna, autoTrend, epNum: epNum ? parseInt(epNum) : null });
   if (!r.success) { setDot('01', 'red'); appendLog('❌ 01 대본 실패 — 파이프라인 중단', 'error'); showToast('❌ 01 대본 생성 실패'); return; }
   await loadScripts(); setDot('01', 'green'); setTab('scripts');
 

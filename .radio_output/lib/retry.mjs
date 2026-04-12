@@ -23,8 +23,18 @@ export async function withRetry(fn, label, maxRetries = 3, delays = [10000, 3000
       const msg    = err.message ?? '';
       const is503  = msg.includes('503') || /unavailable|overloaded/i.test(msg);
       const is429  = msg.includes('429') || /quota|rate/i.test(msg);
-      const retryable = is503 || is429;
 
+      // 일일 한도(RPD) 초과 — 재시도해도 당일은 해결 불가, 즉시 중단
+      // Gemini: GenerateRequestsPerDayPerProjectPerModel-FreeTier (quotaId 필드에 있음)
+      // Claude: credit balance / 529
+      const isDailyQuota = msg.includes('GenerateRequestsPerDayPerProjectPerModel') ||
+                           msg.includes('credit balance') || err.status === 529;
+      if (isDailyQuota) {
+        console.error(`   ❌ [${label}] 일일 할당량 소진 또는 크레딧 부족 — 재시도 중단`);
+        throw err;
+      }
+
+      const retryable = is503 || is429;
       if (i < maxRetries && retryable) {
         const base = delays[Math.min(i, delays.length - 1)];
         const wait = is429 ? base * 2 : base;

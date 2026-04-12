@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import Anthropic from '@anthropic-ai/sdk';
 import fs from 'fs';
 import { loadEnv, requireEnv } from './lib/env.mjs';
 import { generateEpId, makePaths, ensureDirs, updateStage } from './lib/paths.mjs';
@@ -11,7 +11,8 @@ ensureDirs(P);
 // PATCH 4: --qna 플래그 파싱
 const includeQna = process.argv.includes('--qna');
 
-const API_KEY = requireEnv('GEMINI_API_KEY');
+const API_KEY = requireEnv('ANTHROPIC_API_KEY');
+const client = new Anthropic({ apiKey: API_KEY });
 
 const scripts = JSON.parse(fs.readFileSync(P.scripts, 'utf-8'));
 const [ep1, ep2, ep3] = scripts.episodes;
@@ -66,18 +67,9 @@ const QNA_INSTRUCTION = includeQna ? `
   }
 - --qna 플래그가 활성화된 경우에만 이 필드를 포함한다.` : '';
 
-// PATCH 7: GoogleGenerativeAI로 교체
-const genAI = new GoogleGenerativeAI(API_KEY);
-const model = genAI.getGenerativeModel({
-  model: 'gemini-2.5-flash',
-  generationConfig: {
-    temperature: 0.8,
-    maxOutputTokens: 8192,
-    thinkingConfig: { thinkingBudget: 0 },
-  },
-});
+const DJ_MODEL = 'claude-sonnet-4-5';
 
-console.log('🎙️  テンキ爺 전체 방송 멘트 생성 중 (ビートたけし스타일 롱폼, Gemini API)...');
+console.log('🎙️  テンキ爺 전체 방송 멘트 생성 중 (ビートたけし스타일 롱폼, Claude API)...');
 
 const prompt = `
 ${referenceKnowledge}
@@ -136,8 +128,13 @@ let retryCount = 0;
 let djMents;
 while (retryCount < 3) {
   try {
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
+    const message = await client.messages.create({
+      model: DJ_MODEL,
+      max_tokens: 8192,
+      temperature: 0.8,
+      messages: [{ role: 'user', content: prompt }],
+    });
+    const text = message.content[0]?.text ?? '';
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('JSON 파싱 실패');
     const parsed = JSON.parse(jsonMatch[0]);
@@ -153,9 +150,18 @@ while (retryCount < 3) {
     djMents = parsed;
     break;
   } catch (err) {
+    const msg = err.message ?? '';
+    // 일일 한도(RPD) 초과 — 재시도 무의미, 즉시 중단
+    if (msg.includes('daily') || msg.includes('PerDay') || msg.includes('credit balance') ||
+        (err.status === 529) || (err.status === 529)) {
+      console.error(`❌ Claude API 일일 한도 또는 크레딧 부족 — 즉시 중단`);
+      console.error(`   └ ${msg.slice(0, 200)}`);
+      process.exit(1);
+    }
     retryCount++;
-    console.warn(`⚠️ 재시도 ${retryCount}/3: ${err.message}`);
+    console.warn(`⚠️ 재시도 ${retryCount}/3: ${msg.slice(0, 200)}`);
     if (retryCount >= 3) { console.error('❌ 최대 재시도 초과'); process.exit(1); }
+    await new Promise(r => setTimeout(r, 3000 * retryCount));
   }
 }
 

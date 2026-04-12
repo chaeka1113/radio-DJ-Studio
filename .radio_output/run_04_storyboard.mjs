@@ -1,14 +1,13 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import Anthropic from '@anthropic-ai/sdk';
 import fs from 'fs';
 import { loadEnv, requireEnv } from './lib/env.mjs';
 import { generateEpId, makePaths, ensureDirs, updateStage } from './lib/paths.mjs';
-import { withRetry } from './lib/retry.mjs';
 
 loadEnv();
 const epId = process.env.EP_ID ?? generateEpId();
 const P    = makePaths(epId);
 ensureDirs(P);
-const API_KEY = requireEnv('GEMINI_API_KEY');
+const API_KEY = requireEnv('ANTHROPIC_API_KEY');
 
 // ── 전역 규칙 로드 ────────────────────────────────────────────────────────────
 const globalRules  = fs.readFileSync(P.refVisual, 'utf-8');
@@ -26,16 +25,8 @@ if (fs.existsSync(P.characterSheet)) {
 const hasQA = fs.existsSync(P.qaScript);
 if (hasQA) console.log('ℹ️  QA 코너 감지 → EP2 직후 DJ_SHOT 씬 삽입 예정');
 
-const genAI = new GoogleGenerativeAI(API_KEY);
-const model = genAI.getGenerativeModel({
-  model: 'gemini-2.5-flash',
-  generationConfig: {
-    temperature: 0.7,
-    maxOutputTokens: 32768,
-    responseMimeType: 'application/json',
-    thinkingConfig: { thinkingBudget: 0 },
-  },
-});
+const client = new Anthropic({ apiKey: API_KEY });
+const SB_MODEL = 'claude-sonnet-4-5';
 
 // テンキ爺 고정 시드 (TENKI_JII)
 const DJ_SEED = '(Showa retro anime, Studio Ghibli style hand-drawn illustration), A battered retro tin robot DJ (Tenki-jii) at a vintage Showa-era radio desk, square boxy head with cracked paint and rust spots, single glowing mono-eye, bent antennae, faded red chest panel with analog dials, worn mechanical arms, warm amber vacuum tube glow, dusty studio with stacked vinyl records,';
@@ -140,8 +131,8 @@ ${ep.script}
 Rules:
 - Each scene = 4~6 seconds (~20~35 Japanese chars at natural reading pace)
 - scene types: CHARACTER_SCENE / ESTABLISHING / CLOSE_UP / FLASHBACK
-- visual_prompt_en MUST begin with the character seed above, then add scene-specific action/setting details
-- FLASHBACK scenes: immediately after the character seed, insert "younger version of this character in their 20s-30s, youthful face without wrinkles, energetic posture," to show the past/youth version
+- visual_prompt_en MUST begin with the character seed above, then describe the scene as a NARRATIVE SENTENCE (not a keyword list). Write "An elderly woman sits at her kitchen table, both hands wrapped around a warm cup of tea. Morning light filters through the window." — NOT "elderly woman, sitting, kitchen, tea cup, morning light".
+- FLASHBACK scenes: immediately after the character seed, insert "younger version of this character in their 20s-30s, youthful face without wrinkles, energetic posture," then continue with narrative scene description
 - End every visual_prompt_en with: "Showa retro anime illustration, Studio Ghibli warm palette, masterpiece, best quality, highly detailed, 8k, cinematic, 16:9"
 - speaker format: "NARRATOR (${ep.character.name}・${ep.character.age})"
 
@@ -151,7 +142,7 @@ Output JSON array only:
     "japanese_dialogue": "台詞テキスト",
     "type": "CHARACTER_SCENE|ESTABLISHING|CLOSE_UP|FLASHBACK",
     "duration_sec": 5,
-    "visual_prompt_en": "[character seed], [scene action/setting], Showa retro anime...",
+    "visual_prompt_en": "[character seed] [narrative scene sentence describing action, environment, mood]. Showa retro anime...",
     "negative_prompt": "modern style, photorealistic, 3D render, nsfw, blurry, western features",
     "camera_direction": "description",
     "transition": "CUT|DISSOLVE|FADE_IN|FADE_OUT"
@@ -161,8 +152,13 @@ Output JSON array only:
   let scenes = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const result = await withRetry(() => model.generateContent(prompt), `EP${ep.id}`);
-      const text = result.response.text();
+      const message = await client.messages.create({
+        model: SB_MODEL,
+        max_tokens: 32768,
+        temperature: 0.7,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      const text = message.content[0]?.text ?? '';
       const jsonMatch = text.match(/\[[\s\S]*\]/);
       if (!jsonMatch) throw new Error('JSON 배열 없음');
       scenes = JSON.parse(jsonMatch[0]);

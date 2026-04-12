@@ -1,31 +1,23 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import Anthropic from '@anthropic-ai/sdk';
 import fs from 'fs';
 import { loadEnv, requireEnv } from './lib/env.mjs';
 import { generateEpId, makePaths, ensureDirs } from './lib/paths.mjs';
-import { withRetry } from './lib/retry.mjs';
+// (withRetry 불필요 — Claude SDK 직접 호출)
 
 loadEnv();
 const epId = process.env.EP_ID ?? generateEpId();
 const P    = makePaths(epId);
 ensureDirs(P);
-const API_KEY = requireEnv('GEMINI_API_KEY');
+const API_KEY = requireEnv('ANTHROPIC_API_KEY');
+const client = new Anthropic({ apiKey: API_KEY });
+
+const CAST_MODEL = 'claude-sonnet-4-5';
 
 // ── 전역 규칙 로드 ────────────────────────────────────────────────────────────
 const globalRules  = fs.readFileSync(P.refVisual, 'utf-8');
 const visualRubric = fs.readFileSync(P.refVisualRubric, 'utf-8');
 
 const djScript = JSON.parse(fs.readFileSync(P.djScript, 'utf-8'));
-
-const genAI = new GoogleGenerativeAI(API_KEY);
-const model = genAI.getGenerativeModel({
-  model: 'gemini-2.5-flash',
-  generationConfig: {
-    temperature: 0.7,
-    maxOutputTokens: 8192,
-    responseMimeType: 'application/json',
-    thinkingConfig: { thinkingBudget: 0 },
-  },
-});
 
 
 const characters = [];
@@ -99,15 +91,26 @@ Output JSON only:
   let charData = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const result = await withRetry(() => model.generateContent(prompt), `EP${ep.id}`);
-      const text = result.response.text();
+      const message = await client.messages.create({
+        model: CAST_MODEL,
+        max_tokens: 8192,
+        temperature: 0.7,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      const text = message.content[0]?.text ?? '';
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (!jsonMatch) throw new Error('JSON 블록 없음');
       charData = JSON.parse(jsonMatch[0]);
       if (!charData.character_seed) throw new Error('character_seed 필드 없음');
       break;
     } catch (err) {
-      console.warn(`   ⚠️ EP${ep.id} 시도 ${attempt + 1}/3 실패: ${err.message}`);
+      const msg = err.message ?? '';
+      // 일일 한도 — 재시도 무의미, 즉시 중단
+      if (msg.includes('credit balance') || err.status === 529) {
+        console.error(`   ❌ Claude API 크레딧 부족 — 즉시 중단`);
+        process.exit(1);
+      }
+      console.warn(`   ⚠️ EP${ep.id} 시도 ${attempt + 1}/3 실패: ${msg.slice(0, 200)}`);
       if (attempt >= 2) { console.error(`   ❌ EP${ep.id} 캐릭터 시드 생성 실패`); }
       else await new Promise(r => setTimeout(r, 5000));
     }

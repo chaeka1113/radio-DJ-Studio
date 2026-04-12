@@ -1,6 +1,6 @@
 import fs from 'fs';
-import https from 'https';
 import { execSync } from 'child_process';
+import { GoogleGenAI } from '@google/genai';
 import { loadEnv, requireEnv } from './lib/env.mjs';
 import { generateEpId, makePaths, ensureDirs, updateStage } from './lib/paths.mjs';
 
@@ -10,47 +10,59 @@ const P    = makePaths(epId);
 ensureDirs(P);
 const API_KEY = requireEnv('GEMINI_API_KEY');
 
+// "Nano Banana" = Gemini 2.5 Flash Image (Native Image Generation)
+const IMAGE_MODEL = 'gemini-2.5-flash-image';
+
 const storyboard = JSON.parse(fs.readFileSync(P.storyboard, 'utf-8'));
 // flat 배열(신규) 또는 episodes[].scenes(구형) 모두 지원
 const scenes = storyboard.scenes
   ?? storyboard.episodes?.flatMap(ep => (ep.scenes || []).map(s => ({ ...s, episode_id: ep.episode_id ?? ep.id })))
   ?? [];
 
-// Imagen 4.0 REST API
-async function generateImageImagen3(prompt) {
-  const body = JSON.stringify({
-    instances: [{ prompt }],
-    parameters: {
-      sampleCount: 1,
-      aspectRatio: '16:9',
-      safetyFilterLevel: 'BLOCK_ONLY_HIGH',
-      personGeneration: 'ALLOW_ALL',
+// ── [Textual DNA] 사연 주인공 시드 맵 로드 ───────────────────────────────────
+// 03_character_prompts.json의 character_seed를 episode_id 기준으로 매핑
+// 캐스팅 단계에서 확정된 외모를 이미지 생성 단계에서 강제 재주입해 일관성 확보
+const episodeDNAMap = new Map();
+if (fs.existsSync(P.characterPrompts)) {
+  const charData = JSON.parse(fs.readFileSync(P.characterPrompts, 'utf-8'));
+  (charData.characters ?? []).forEach(c => {
+    if (c.episode_id != null && c.character_seed) {
+      episodeDNAMap.set(c.episode_id, c.character_seed.trim());
     }
   });
-
-  return new Promise((resolve, reject) => {
-    const options = {
-      hostname: 'generativelanguage.googleapis.com',
-      path: `/v1beta/models/imagen-4.0-generate-001:predict?key=${API_KEY}`,
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-    };
-    const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', c => data += c);
-      res.on('end', () => {
-        if (res.statusCode !== 200) { reject(new Error(`HTTP ${res.statusCode}: ${data.slice(0, 300)}`)); return; }
-        const json = JSON.parse(data);
-        const b64 = json.predictions?.[0]?.bytesBase64Encoded;
-        if (!b64) { reject(new Error('이미지 데이터 없음')); return; }
-        resolve(b64);
-      });
-    });
-    req.on('error', reject);
-    req.write(body);
-    req.end();
-  });
+  console.log(`🧬 캐릭터 DNA 로드: ${episodeDNAMap.size}개 에피소드`);
+} else {
+  console.warn('⚠️  03_character_prompts.json 없음 — 사연 주인공 DNA 주입 스킵');
 }
+
+const ai = new GoogleGenAI({ apiKey: API_KEY });
+
+// Gemini 2.5 Flash Image (Nano Banana) — new @google/genai SDK
+async function generateImageGemini(prompt, negativePrompt) {
+  // 네거티브 프롬프트를 텍스트 지시로 병합 (Gemini는 별도 파라미터 미지원)
+  const fullPrompt = negativePrompt
+    ? `${prompt}\n\nDo NOT include in the image: ${negativePrompt}`
+    : prompt;
+
+  const response = await ai.models.generateContent({
+    model: IMAGE_MODEL,
+    contents: fullPrompt,
+    config: {
+      responseModalities: ['TEXT', 'IMAGE'],
+      imageConfig: { aspectRatio: '16:9' },
+    },
+  });
+
+  const parts = response.candidates?.[0]?.content?.parts ?? [];
+  const imgPart = parts.find(p => p.inlineData?.mimeType?.startsWith('image/'));
+  if (!imgPart) throw new Error('이미지 데이터 없음');
+  return imgPart.inlineData.data; // base64
+}
+
+// ── [Textual DNA] テンキ爺 고정 외모 변수 ────────────────────────────────────
+// 이 텍스트는 DJ_SHOT 씬 프롬프트 맨 앞에 자동 주입됩니다.
+// 나중에 캐릭터 외모를 바꾸고 싶으면 이 부분만 수정하세요.
+const CHARACTER_DNA = 'A consistent character design: a battered retro tin robot DJ named Tenki-jii, square boxy head with cracked paint and rust spots, single glowing amber mono-eye, bent antennae with small flags, faded red chest panel with analog dials and gauges, worn silver mechanical arms with visible joints, seated behind a vintage Showa-era wooden radio desk stacked with vinyl records and vacuum tubes,';
 
 const STYLE_SUFFIX = ' Showa retro anime illustration, Studio Ghibli warm color palette, warm amber cinematic lighting, masterpiece, best quality, highly detailed, 8k.';
 
@@ -62,7 +74,7 @@ async function generateWithBackoff(prompt, negativePrompt, sceneId) {
   let lastErr;
   for (let attempt = 0; attempt <= BACKOFF_DELAYS.length; attempt++) {
     try {
-      return await generateImageImagen3(prompt);
+      return await generateImageGemini(prompt, negativePrompt);
     } catch (err) {
       lastErr = err;
       const is429 = err.message.includes('429') || err.message.toLowerCase().includes('quota');
@@ -71,7 +83,7 @@ async function generateWithBackoff(prompt, negativePrompt, sceneId) {
         if (is429) {
           console.warn(`\n   🚨 [${sceneId}] Quota 제한 도달: ${waitMs / 1000}초 대기 중... (시도 ${attempt + 1}/${BACKOFF_DELAYS.length})`);
         } else {
-          console.warn(`   ⚠️ [${sceneId}] 시도 ${attempt + 1} 실패 (${err.message.slice(0, 60)})`);
+          console.warn(`   ⚠️ [${sceneId}] 시도 ${attempt + 1} 실패 (${err.message.slice(0, 200)})`);
           console.log(`   ⏳ ${waitMs / 1000}초 대기 후 Imagen 4.0 재시도...`);
         }
         await new Promise(r => setTimeout(r, waitMs));
@@ -128,9 +140,21 @@ for (let i = 0; i < scenes.length; i++) {
     continue;
   }
 
-  const prompt = scene.visual_prompt_en + STYLE_SUFFIX;
+  // ── [Textual DNA] 캐릭터 DNA 강제 주입 ─────────────────────────────────
+  // DJ_SHOT → CHARACTER_DNA(상수) / 사연 씬 → 03_character_prompts의 character_seed
+  const isDJScene = scene.type === 'DJ_SHOT' || scene.speaker === 'TENKI_JII';
+  const episodeSeed = scene.episode_id != null ? episodeDNAMap.get(scene.episode_id) : null;
+  let dna = null;
+  if (isDJScene) {
+    dna = CHARACTER_DNA;
+  } else if (episodeSeed) {
+    dna = episodeSeed;
+  }
+  const basePrompt = dna ? dna + ' ' + scene.visual_prompt_en : scene.visual_prompt_en;
+  const prompt = basePrompt + STYLE_SUFFIX;
   const negPrompt = scene.negative_prompt || GLOBAL_NEGATIVE;
-  process.stdout.write(`🖼️  [${i+1}/${scenes.length}] ${scene.scene_id} (${scene.type})... `);
+  const dnaTag = isDJScene ? '[DJ]' : (episodeSeed ? `[EP${scene.episode_id}]` : '[-]');
+  process.stdout.write(`🖼️  [${i+1}/${scenes.length}] ${scene.scene_id} (${scene.type}) ${dnaTag}... `);
 
   try {
     const b64 = await generateWithBackoff(prompt, negPrompt, scene.scene_id);

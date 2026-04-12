@@ -1,7 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk';
 import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { loadEnv, requireEnv } from './lib/env.mjs';
 import { generateEpId, makePaths, ensureDirs, updateStage } from './lib/paths.mjs';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 loadEnv();
 const epId = process.env.EP_ID ?? generateEpId();
@@ -12,7 +17,13 @@ const API_KEY = requireEnv('ANTHROPIC_API_KEY');
 
 const allArgs = process.argv.slice(2);
 const includeMz = allArgs.includes('--mz');
-const topics = allArgs.filter(a => !a.startsWith('--'));
+const epArgIdx = allArgs.indexOf('--ep');
+const EP_NUM = epArgIdx !== -1 ? parseInt(allArgs[epArgIdx + 1]) : null;
+const topics = allArgs.filter((a, i) => {
+  if (a.startsWith('--')) return false;
+  if (epArgIdx !== -1 && i === epArgIdx + 1) return false; // --ep 의 값(숫자)은 topic에서 제외
+  return true;
+});
 if (topics.length < 3) { console.error('❌ 주제 3개 필요'); process.exit(1); }
 
 // MZ 모드: contract가 있으면 거기서 mzEpNum 읽기, 없으면 랜덤
@@ -35,6 +46,74 @@ const scriptRubric = fs.readFileSync(P.refScriptRubric, 'utf-8');
 // ── 영구 오답 노트 로드 (존재할 때만) ────────────────────────────────────────
 const pastLearnings = fs.existsSync(P.learnings) ? fs.readFileSync(P.learnings, 'utf-8') : null;
 if (pastLearnings) console.log('🧠 [Learnings] 과거 실수 모음 주입 완료');
+
+// ── 방송 히스토리 컨텍스트 빌더 ──────────────────────────────────────────────
+function buildHistoryContext(historyPath, thisEpKeywords, currentEp) {
+  if (!currentEp || isNaN(currentEp)) return '';
+  if (!fs.existsSync(historyPath)) return '';
+
+  const history = JSON.parse(fs.readFileSync(historyPath, 'utf-8'));
+  if (history.meta.total_episodes === 0) return '';
+
+  const REAPPEAR_COOLDOWN = 5;
+  const EPISODE_LOOKBACK = 5;
+  const parts = [];
+
+  // DJ 캐릭터 설정 — 항상 주입
+  if (history.dj_character.established_traits.length > 0) {
+    parts.push(`
+【テンキ爺のキャラクター設定 - 必ず守ること】
+${history.dj_character.established_traits.join('\n')}
+【お決まりネタ】
+${history.dj_character.running_gags.join('\n')}`);
+  }
+
+  // 재등장 가능 청취자 — 5화 쿨다운 + 키워드 겹칠 때만
+  const reappearCandidates = history.listeners.filter(l => {
+    const keywordMatch = l.keywords.some(k =>
+      thisEpKeywords.some(tk => tk.includes(k) || k.includes(tk))
+    );
+    const cooldownOk = (currentEp - l.last_appeared) >= REAPPEAR_COOLDOWN;
+    return keywordMatch && cooldownOk;
+  });
+
+  if (reappearCandidates.length > 0) {
+    parts.push(`
+【再登場してもいいリスナー候補】
+※使っても使わなくてもいい・自然な流れの時だけ
+※再登場させる場合、テンキ爺が「あ、またお前か」的に気づくこと
+${reappearCandidates.map(l =>
+  `・${l.name}(${l.age}歳) 第${l.first_appeared}回初登場\n` +
+  `  プロフィール: ${l.profile}\n` +
+  `  その後: ${l.outcome}`
+).join('\n')}`);
+  }
+
+  // 관련 과거 에피소드 — 최근 5화 이내 + 키워드 겹칠 때만
+  const recentEps = history.episodes
+    .filter(ep => (currentEp - ep.ep_num) <= EPISODE_LOOKBACK)
+    .filter(ep =>
+      ep.keywords.some(k =>
+        thisEpKeywords.some(tk => tk.includes(k) || k.includes(tk))
+      )
+    );
+
+  if (recentEps.length > 0) {
+    parts.push(`
+【過去放送の記憶 - 自然に思い出した時だけ言及・強制ではない】
+${recentEps.map(ep =>
+  `第${ep.ep_num}回(${ep.date}): ${ep.dj_highlights}\n` +
+  `  印象的な一言: "${ep.memorable_line}"`
+).join('\n')}`);
+  }
+
+  if (parts.length === 0) return '';
+  return '\n\n---\n' + parts.join('\n') + '\n---';
+}
+
+const historyPath = path.join(__dirname, 'ref_broadcast_history.json');
+const historyContext = buildHistoryContext(historyPath, topics, EP_NUM);
+if (historyContext) console.log('📚 [History] 과거 방송 컨텍스트 주입 완료');
 
 // ── 전역 상태 초기화 ───────────────────────────────────────────────────────────
 console.log('🗑  이전 작업물 초기화 중...');
@@ -98,7 +177,7 @@ ${pastLearnings ? `---
 같은 실수를 한 번이라도 반복하면 QA에서 즉시 감점된다. 반드시 숙지하라.
 
 ${pastLearnings}
-` : ''}`;
+` : ''}${historyContext}`;
 
 console.log('📝 대본 생성 중 (Claude API — 에피소드별 개별 호출)...');
 

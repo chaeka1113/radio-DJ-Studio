@@ -9,7 +9,7 @@
  * 새로운 실수가 없으면 기존 파일 그대로 유지 (no-op).
  * Clean Exit: process.exitCode
  */
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 import fs from 'fs';
 import { loadEnv, requireEnv } from './lib/env.mjs';
 import { generateEpId, makePaths } from './lib/paths.mjs';
@@ -80,15 +80,9 @@ const MAX_BULLETS    = 10;
     return;
   }
 
-  const genAI = new GoogleGenerativeAI(API_KEY);
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash',
-    generationConfig: {
-      temperature: 0.2,
-      maxOutputTokens: 2048,
-      thinkingConfig: { thinkingBudget: 0 },
-    },
-  });
+  const ai = new GoogleGenAI({ apiKey: API_KEY });
+  const WU_MODEL  = 'gemini-2.5-flash';
+  const WU_CONFIG = { temperature: 0.2, maxOutputTokens: 2048, thinkingConfig: { thinkingBudget: 0 } };
 
   const compressPrompt = `
 당신은 テンキ爺ラジオ 대본 생성 시스템의 오답 노트 관리자입니다.
@@ -116,8 +110,8 @@ ${newMistakes.map(m => `- ${m}`).join('\n')}
     const delays = [5000, 15000, 30000];
     for (let i = 0; i <= delays.length; i++) {
       try {
-        const result = await model.generateContent(compressPrompt);
-        compressed = result.response.text().trim();
+        const result = await ai.models.generateContent({ model: WU_MODEL, contents: compressPrompt, config: WU_CONFIG });
+        compressed = result.text.trim();
         break;
       } catch (err) {
         const retryable = err.message?.includes('429') || err.message?.includes('503');

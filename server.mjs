@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import { spawn } from 'child_process';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 import fs from 'fs';
 import https from 'https';
 import path from 'path';
@@ -12,6 +12,9 @@ const __dirname  = path.dirname(fileURLToPath(import.meta.url));
 const RADIO_DIR  = path.join(__dirname, '.radio_output');  // scripts live here (cwd)
 const OUTPUT_DIR = path.join(__dirname, '.output');        // episode artifacts live here
 const API_KEY    = process.env.GEMINI_API_KEY;
+
+// Gemini 이미지 생성 클라이언트 (Nano Banana — 2.5 Flash Image)
+const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 /** Active episode ID — set once per pipeline run in /api/generate-scripts */
 let currentEpId = null;
@@ -86,8 +89,16 @@ function runScript(sse, scriptName, args = []) {
 
 // 01 대본 생성
 app.post('/api/generate-scripts', async (req, res) => {
-  const { topics, includeMz, includeQna, autoTrend } = req.body;
+  const { topics, includeMz, includeQna, autoTrend, epNum } = req.body;
   const sse = sseStream(res);
+
+  // epNum 유효성 검사
+  const validEpNum = (epNum && !isNaN(epNum) && epNum >= 1) ? parseInt(epNum) : null;
+  if (validEpNum) {
+    sse.log(`📺 정식 방송 모드 — EP${validEpNum}`);
+  } else {
+    sse.log('🧪 테스트 모드 — 히스토리 저장 스킵');
+  }
 
   // 새 파이프라인 실행마다 새 EP_ID 발급
   currentEpId = generateEpId();
@@ -130,15 +141,12 @@ app.post('/api/generate-scripts', async (req, res) => {
       // 한국어 번역 (대시보드 확인용 — 실제 대본에 영향 없음)
       if (API_KEY) {
         try {
-          const genAI = new GoogleGenerativeAI(API_KEY);
-          const model = genAI.getGenerativeModel({
+          const result = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
-            generationConfig: { temperature: 0.3, maxOutputTokens: 256, thinkingConfig: { thinkingBudget: 0 } },
+            contents: `다음 일본어 주제 3개를 한국어로 간결하게 번역해라 (각 5단어 이내). JSON 배열만 반환: ["번역1", "번역2", "번역3"]\n주제1: ${finalTopics[0]}\n주제2: ${finalTopics[1]}\n주제3: ${finalTopics[2]}`,
+            config: { temperature: 0.3, maxOutputTokens: 256, thinkingConfig: { thinkingBudget: 0 } },
           });
-          const result = await model.generateContent(
-            `다음 일본어 주제 3개를 한국어로 간결하게 번역해라 (각 5단어 이내). JSON 배열만 반환: ["번역1", "번역2", "번역3"]\n주제1: ${finalTopics[0]}\n주제2: ${finalTopics[1]}\n주제3: ${finalTopics[2]}`
-          );
-          const rawText = result.response.text().match(/\[[\s\S]*?\]/)?.[0];
+          const rawText = result.text.match(/\[[\s\S]*?\]/)?.[0];
           if (rawText) {
             const koTopics = JSON.parse(rawText);
             if (koTopics.length >= 3) {
@@ -163,7 +171,7 @@ app.post('/api/generate-scripts', async (req, res) => {
   // MZ 플래그 로그
   sse.log('🔥 MZ 플래그: ' + (includeMz ? 'ON' : 'OFF'));
 
-  const pipelineArgs = [...finalTopics.slice(0, 3), ...(includeMz ? ['--mz'] : []), ...(includeQna ? ['--qna'] : [])];
+  const pipelineArgs = [...finalTopics.slice(0, 3), ...(includeMz ? ['--mz'] : []), ...(includeQna ? ['--qna'] : []), ...(validEpNum ? ['--ep', String(validEpNum)] : [])];
 
   // STEP 0: Planner — 에피소드 계약서 생성
   sse.log('📋 [Planner] 에피소드 완료 기준서 생성 중...');
@@ -330,37 +338,25 @@ app.post('/api/regenerate-image', async (req, res) => {
   const scene = scenes.find(s => s.scene_id === scene_id);
   if (!scene) return res.status(404).json({ error: `씬 ${scene_id} 없음` });
 
-  const STYLE           = ' Showa retro anime illustration, Studio Ghibli warm color palette, warm amber cinematic lighting, masterpiece, best quality, highly detailed, 8k, 16:9.';
-  const FALLBACK_NEG    = 'photorealistic, 3d render, realistic, photography, highly detailed skin, cyberpunk, transformer, modern style, neon colors, glossy texture, plastic texture, abstract, moles, beauty marks, glasses, spectacles, nsfw, blurry, watermark, western features';
-  const prompt          = scene.visual_prompt_en + STYLE;
-  const negativePrompt  = scene.negative_prompt || FALLBACK_NEG;
-  const body            = JSON.stringify({
-    instances:  [{ prompt }],
-    parameters: { sampleCount: 1, aspectRatio: '16:9', safetyFilterLevel: 'BLOCK_ONLY_HIGH', personGeneration: 'ALLOW_ALL', negativePrompt },
-  });
+  const STYLE        = ' Showa retro anime illustration, Studio Ghibli warm color palette, warm amber cinematic lighting, masterpiece, best quality, highly detailed, 8k, 16:9.';
+  const FALLBACK_NEG = 'photorealistic, 3d render, realistic, photography, highly detailed skin, cyberpunk, transformer, modern style, neon colors, glossy texture, plastic texture, abstract, moles, beauty marks, glasses, spectacles, nsfw, blurry, watermark, western features';
+  const positivePrompt = scene.visual_prompt_en + STYLE;
+  const negativePrompt = scene.negative_prompt || FALLBACK_NEG;
+  const fullPrompt     = `${positivePrompt}\n\nDo NOT include in the image: ${negativePrompt}`;
 
   try {
-    const b64 = await new Promise((resolve, reject) => {
-      const opts = {
-        hostname: 'generativelanguage.googleapis.com',
-        path:     `/v1beta/models/imagen-4.0-generate-001:predict?key=${API_KEY}`,
-        method:   'POST',
-        headers:  { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-      };
-      const r = https.request(opts, (resp) => {
-        let data = '';
-        resp.on('data', c => data += c);
-        resp.on('end', () => {
-          if (resp.statusCode !== 200) { reject(new Error(`HTTP ${resp.statusCode}: ${data.slice(0, 200)}`)); return; }
-          const json = JSON.parse(data);
-          const b64  = json.predictions?.[0]?.bytesBase64Encoded;
-          b64 ? resolve(b64) : reject(new Error('이미지 데이터 없음'));
-        });
-      });
-      r.on('error', reject);
-      r.write(body);
-      r.end();
+    const result = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-image',
+      contents: fullPrompt,
+      config: {
+        responseModalities: ['TEXT', 'IMAGE'],
+        imageConfig: { aspectRatio: '16:9' },
+      },
     });
+    const parts  = result.candidates?.[0]?.content?.parts ?? [];
+    const imgPart = parts.find(p => p.inlineData?.mimeType?.startsWith('image/'));
+    if (!imgPart) throw new Error('이미지 데이터 없음');
+    const b64 = imgPart.inlineData.data;
 
     fs.mkdirSync(P.images, { recursive: true });
     fs.writeFileSync(path.join(P.images, `${scene_id}.png`), Buffer.from(b64, 'base64'));
@@ -393,15 +389,12 @@ app.post('/api/translate', async (req, res) => {
   if (!text)    return res.status(400).json({ error: 'text 필요' });
   if (!API_KEY) return res.status(500).json({ error: 'GEMINI_API_KEY 없음' });
   try {
-    const genAI = new GoogleGenerativeAI(API_KEY);
-    const model = genAI.getGenerativeModel({
+    const result = await geminiWithRetry(() => ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      generationConfig: { temperature: 0.3, maxOutputTokens: 16384, thinkingConfig: { thinkingBudget: 0 } },
-    });
-    const result = await geminiWithRetry(() => model.generateContent(
-      `주어진 일본어 라디오 대본을 한국어로 자연스럽게 번역해라. 번역된 텍스트만 반환해라.\n\n${text}`
-    ));
-    res.json({ translated: result.response.text() });
+      contents: `주어진 일본어 라디오 대본을 한국어로 자연스럽게 번역해라. 번역된 텍스트만 반환해라.\n\n${text}`,
+      config: { temperature: 0.3, maxOutputTokens: 16384, thinkingConfig: { thinkingBudget: 0 } },
+    }));
+    res.json({ translated: result.text });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

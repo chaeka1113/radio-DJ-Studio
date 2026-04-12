@@ -18,11 +18,10 @@
  * 결과: 04_visual_qa_result.json / 04_storyboard.json 인플레이스 업데이트
  * Clean Exit: process.exitCode + top-level await
  */
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import Anthropic from '@anthropic-ai/sdk';
 import fs from 'fs';
 import { loadEnv } from './lib/env.mjs';
 import { generateEpId, makePaths, ensureDirs } from './lib/paths.mjs';
-import { withRetry } from './lib/retry.mjs';
 
 loadEnv();
 const epId = process.env.EP_ID ?? generateEpId();
@@ -57,15 +56,15 @@ const MIDJOURNEY_PARAM_RE = /--\w[\w:]+(\s+[\w.:]+)?/g;
     return;
   }
 
-  const API_KEY = process.env.GEMINI_API_KEY;
+  const API_KEY = process.env.ANTHROPIC_API_KEY;
   if (!API_KEY) {
-    console.warn('⚠️ GEMINI_API_KEY 없음 — Visual QA 스킵 (Pass 처리)');
+    console.warn('⚠️ ANTHROPIC_API_KEY 없음 — Visual QA 스킵 (Pass 처리)');
     const storyboard = JSON.parse(fs.readFileSync(P.storyboard, 'utf-8'));
     const total = (storyboard.scenes || storyboard).length;
     fs.writeFileSync(P.visualQaResult, JSON.stringify({
       verdict: 'Pass', skipped: true, total_scenes: total,
       checked_scenes: 0, fixed_scenes: 0, failed_scenes: [],
-      summary: 'GEMINI_API_KEY 없음 — 스킵',
+      summary: 'ANTHROPIC_API_KEY 없음 — 스킵',
     }, null, 2));
     process.exitCode = 0;
     return;
@@ -76,210 +75,189 @@ const MIDJOURNEY_PARAM_RE = /--\w[\w:]+(\s+[\w.:]+)?/g;
   // 스토리보드는 배열 또는 { scenes: [] } 형태 모두 허용
   const scenes      = Array.isArray(storyboard) ? storyboard : (storyboard.scenes || []);
 
-  const genAI = new GoogleGenerativeAI(API_KEY);
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash',
-    generationConfig: {
-      temperature: 0.3,
-      maxOutputTokens: 2048,
-      thinkingConfig: { thinkingBudget: 0 },
-    },
-  });
+  const client   = new Anthropic({ apiKey: API_KEY });
+  const QA_MODEL = 'claude-sonnet-4-5';
 
+  // ── 배치 채점 프롬프트 (씬 전체를 1회 호출) ────────────────────────────
+  function buildBatchScoringPrompt(scenesToScore) {
+    const scenesList = scenesToScore.map((s, i) =>
+      `### Scene ${i + 1}\n` +
+      `- scene_id: "${s.scene_id || `SC${String(i + 1).padStart(3, '0')}`}"\n` +
+      `- type: "${s.type || 'UNKNOWN'}"\n` +
+      `- visual_prompt_en: ${s.visual_prompt_en || ''}\n` +
+      `- negative_prompt: ${s.negative_prompt || '(none)'}`
+    ).join('\n\n');
 
-  // ── 씬 채점 프롬프트 ────────────────────────────────────────────────────
-  function buildScoringPrompt(sceneId, sceneType, visualPrompt, negativePrompt) {
-    return `
-You are a strict visual prompt QA evaluator for an AI image generation pipeline targeting Japanese senior audiences.
-Score the given scene prompt according to the rubric below. Be rigorous — the cutline is ${CUTLINE}/100.
+    return `You are a strict visual prompt QA evaluator for an AI image generation pipeline targeting Japanese senior audiences.
+Score ALL ${scenesToScore.length} scenes below according to the rubric. Cutline is ${CUTLINE}/100.
 
 ## Visual Rubric
 ${rubricText}
 
-## Scene to Evaluate
-- Scene ID: ${sceneId}
-- Scene Type: ${sceneType}
-- visual_prompt_en: ${visualPrompt}
-- negative_prompt: ${negativePrompt || '(none)'}
+## Scoring Rules
+1. Character Consistency & Senior Negative Constraints [40pts]
+   - 1-A (20pts): AI Slop prevention: no moles, no beauty marks, clear skin, no extra fingers, natural aging features
+   - 1-B (20pts): Forbidden styles NOT in visual_prompt_en AND ARE in negative_prompt (cyberpunk, neon colors, glossy texture, plastic texture, abstract, Hyper-modern Transformer style)
+   - DJ_SHOT / ESTABLISHING scenes without character seed → full 40pts automatically
+2. Physical Realism [30pts]: explicit physical verbs for object/body interactions
+3. Art Style Consistency [30pts]: ends with Showa retro anime + Ghibli palette, masterpiece/best quality, no --ar param
 
-## Scoring Instructions
-1. **Item 1 — Character Consistency & Senior Negative Constraints [40 points]**
-   - 1-A (20pts): Check for AI Slop prevention keywords: no moles, no beauty marks, clear skin, no extra fingers, natural aging features
-   - 1-B (20pts): Check that forbidden styles (cyberpunk, neon colors, glossy texture, plastic texture, abstract, Hyper-modern Transformer style) are NOT in visual_prompt_en AND ARE explicitly listed in negative_prompt
-   - DJ_SHOT and ESTABLISHING scenes without a character seed: award full 40pts for item 1 automatically
+## Scenes to Evaluate
+${scenesList}
 
-2. **Item 2 — Physical Realism [30 points]**
-   - Check all object/body interactions use explicit physical verbs (physically holding, firmly gripping, placed on the table, etc.)
-   - Deduct for floating/ambiguous object placement
-
-3. **Item 3 — Art Style Consistency [30 points]**
-   - Check visual_prompt_en ends with: "Showa retro anime illustration, Studio Ghibli warm color palette"
-   - Check for masterpiece/best quality keywords
-   - Deduct 10pts if "--ar" Midjourney parameter found in text
-
-Return ONLY valid JSON, no other text:
-{
-  "scene_id": "${sceneId}",
-  "scores": {
-    "character_consistency": <0-40>,
-    "physical_realism": <0-30>,
-    "art_style": <0-30>
-  },
-  "total": <0-100>,
-  "verdict": "Pass" | "Fix",
-  "deductions": ["[항목명] -Xpt: reason"],
-  "autofix_instructions": ["[항목명]: specific fix instruction"]
-}`;
+Return ONLY a valid JSON array (one object per scene, same order):
+[{"scene_id":"...","scores":{"character_consistency":<0-40>,"physical_realism":<0-30>,"art_style":<0-30>},"total":<0-100>,"verdict":"Pass"|"Fix","deductions":[...],"autofix_instructions":[...]}]`;
   }
 
-  // ── 자동 교정 프롬프트 ──────────────────────────────────────────────────
-  function buildFixPrompt(sceneId, sceneType, originalPrompt, originalNegative, deductions, fixInstructions) {
-    return `
-You are a visual prompt auto-corrector. Apply the fix instructions below to improve the prompt score to ${CUTLINE}+/100.
+  // ── 배치 자동 교정 프롬프트 (실패 씬 전체를 1회 호출) ──────────────────
+  function buildBatchFixPrompt(failedItems) {
+    const scenesList = failedItems.map((item, i) =>
+      `### Scene ${i + 1}\n` +
+      `- scene_id: "${item.sceneId}"\n` +
+      `- type: "${item.sceneType}"\n` +
+      `- visual_prompt_en: ${item.currentPrompt}\n` +
+      `- negative_prompt: ${item.currentNegative || '(none)'}\n` +
+      `- deductions: ${(item.deductions || []).join(' | ')}\n` +
+      `- fix_instructions: ${(item.fixInstructions || []).join(' | ')}`
+    ).join('\n\n');
 
-## Scene Info
-- Scene ID: ${sceneId}
-- Scene Type: ${sceneType}
+    return `You are a visual prompt auto-corrector. Apply fix instructions to reach ${CUTLINE}+/100.
 
-## Original visual_prompt_en
-${originalPrompt}
-
-## Original negative_prompt
-${originalNegative || '(none)'}
-
-## Deductions Found
-${deductions.join('\n')}
-
-## Fix Instructions (apply ALL)
-${fixInstructions.join('\n')}
-
-## Rules for correction
-- Keep the original scene action/story content intact
-- Add missing AI Slop prevention keywords to visual_prompt_en if needed
-- Remove any forbidden style keywords (cyberpunk, neon colors, glossy texture, plastic texture, abstract, Hyper-modern Transformer style) from visual_prompt_en
+## Correction Rules
+- Keep original scene action/story intact
+- Add AI Slop prevention to visual_prompt_en if missing (no moles, no beauty marks, clear skin, no extra fingers, natural aging features)
+- Remove forbidden style keywords from visual_prompt_en (cyberpunk, neon colors, glossy texture, plastic texture, abstract)
 - Ensure negative_prompt includes: modern style, cyberpunk, neon colors, glossy texture, plastic texture, abstract, photorealistic, 3D render, nsfw, blurry, watermark, western features
-- Ensure visual_prompt_en ends with: Showa retro anime illustration, Studio Ghibli warm color palette, warm amber/dusty rose/faded navy tones, masterpiece, best quality, highly detailed, 8k, cinematic
-- Replace floating/ambiguous object descriptions with physical verb forms
-- NEVER add "--ar" Midjourney parameters to text
+- End visual_prompt_en with: Showa retro anime illustration, Studio Ghibli warm color palette, warm amber cinematic lighting, masterpiece, best quality, highly detailed, 8k, 16:9
+- Use explicit physical verbs for object interactions
+- NEVER add --ar Midjourney parameters
 
-Return ONLY valid JSON, no other text:
-{
-  "scene_id": "${sceneId}",
-  "corrected_visual_prompt_en": "full corrected prompt",
-  "corrected_negative_prompt": "full corrected negative prompt"
-}`;
+## Failed Scenes to Correct
+${scenesList}
+
+Return ONLY a valid JSON array:
+[{"scene_id":"...","corrected_visual_prompt_en":"...","corrected_negative_prompt":"..."}]`;
   }
 
-  // ── 메인 루프 ────────────────────────────────────────────────────────────
-  console.log(`🎨 [Visual QA] ${scenes.length}개 씬 가중치 채점 시작 (커트라인 ${CUTLINE}/100)...`);
+  // ── 메인 배치 로직 ────────────────────────────────────────────────────────
+  console.log(`🎨 [Visual QA] ${scenes.length}개 씬 배치 채점 (Claude 1회 호출)...`);
 
   const qaResults = [];
   let fixedCount  = 0;
   let failedCount = 0;
 
+  // STEP 1: 전체 씬 배치 채점 (API 1회)
+  let scoringResults = null;
+  try {
+    const batchPrompt = buildBatchScoringPrompt(scenes);
+    const result = await client.messages.create({
+      model: QA_MODEL,
+      max_tokens: 8192,
+      temperature: 0.3,
+      messages: [{ role: 'user', content: batchPrompt }],
+    });
+    const text = result.content[0]?.text ?? '';
+    const raw  = text.match(/\[[\s\S]*\]/)?.[0];
+    if (!raw) throw new Error('배치 채점 JSON 배열 없음');
+    scoringResults = JSON.parse(raw);
+    console.log(`✅ [Visual QA] 배치 채점 완료 — ${scoringResults.length}씬 결과 수신`);
+  } catch (err) {
+    console.warn(`⚠️ [Visual QA] 배치 채점 실패 → 전체 Pass 처리 (${err.message.slice(0, 120)})`);
+  }
+
+  // STEP 2: 채점 결과 파싱 + 실패 씬 수집
+  const failedItems = [];
   for (let i = 0; i < scenes.length; i++) {
-    const scene = scenes[i];
-    const sceneId   = scene.scene_id || `SC${String(i + 1).padStart(3, '0')}`;
-    const sceneType = scene.type || 'UNKNOWN';
+    const scene   = scenes[i];
+    const sceneId = scene.scene_id || `SC${String(i + 1).padStart(3, '0')}`;
 
-    // ESTABLISHING 배경 전용 씬(캐릭터 없음) + DJ_SHOT은 채점 간소화
-    const isCharacterlessScene = sceneType === 'ESTABLISHING' && !scene.visual_prompt_en?.includes('character');
-
-    let currentPrompt   = scene.visual_prompt_en   || '';
-    let currentNegative = scene.negative_prompt    || '';
-    let scenePassed     = false;
-    let lastScore       = null;
-    let lastDeductions  = [];
-
-    for (let attempt = 0; attempt < MAX_FIX_RETRIES; attempt++) {
-      let scored;
-      try {
-        const scoringPrompt = buildScoringPrompt(sceneId, sceneType, currentPrompt, currentNegative);
-        const result = await withRetry(
-          () => model.generateContent(scoringPrompt),
-          `${sceneId} 채점 시도${attempt + 1}`
-        );
-        const text = result.response.text();
-        const raw  = text.match(/\{[\s\S]*\}/)?.[0];
-        if (!raw) throw new Error('채점 JSON 없음');
-        scored = JSON.parse(raw);
-      } catch (err) {
-        console.warn(`   ⚠️ ${sceneId} 채점 실패 → Pass 처리 (${err.message})`);
-        scenePassed = true;
-        break;
-      }
-
-      lastScore      = scored.total ?? 0;
-      lastDeductions = scored.deductions || [];
-      const verdict  = scored.verdict ?? (lastScore >= CUTLINE ? 'Pass' : 'Fix');
-
-      if (verdict === 'Pass' || lastScore >= CUTLINE) {
-        if (attempt === 0) {
-          process.stdout.write(`   ✅ ${sceneId} [${sceneType}] ${lastScore}/100\n`);
-        } else {
-          console.log(`   ✅ ${sceneId} Auto-fix 성공 (시도 ${attempt + 1}, ${lastScore}/100)`);
-          fixedCount++;
-        }
-        scene.visual_prompt_en = currentPrompt;
-        scene.negative_prompt  = currentNegative;
-        scenePassed = true;
-        break;
-      }
-
-      // Auto-fix 시도
-      console.log(`   ⚠️ ${sceneId} ${lastScore}/100 < ${CUTLINE} — Auto-fix 시도 ${attempt + 1}/${MAX_FIX_RETRIES}`);
-      lastDeductions.forEach(d => console.log(`      ${d}`));
-
-      if (attempt < MAX_FIX_RETRIES - 1) {
-        try {
-          const fixPrompt = buildFixPrompt(
-            sceneId, sceneType, currentPrompt, currentNegative,
-            scored.deductions || [], scored.autofix_instructions || []
-          );
-          const fixResult = await withRetry(
-            () => model.generateContent(fixPrompt),
-            `${sceneId} Auto-fix`
-          );
-          const fixText = fixResult.response.text();
-          const fixRaw  = fixText.match(/\{[\s\S]*\}/)?.[0];
-          if (!fixRaw) throw new Error('교정 JSON 없음');
-          const fixed = JSON.parse(fixRaw);
-          if (fixed.corrected_visual_prompt_en) currentPrompt   = fixed.corrected_visual_prompt_en;
-          if (fixed.corrected_negative_prompt)  currentNegative = fixed.corrected_negative_prompt;
-        } catch (err) {
-          console.warn(`   ⚠️ ${sceneId} Auto-fix ${attempt + 1} 실패: ${err.message}`);
-        }
-      }
-
-      // 딜레이 (API 보호)
-      await new Promise(r => setTimeout(r, 1000));
+    if (!scoringResults) {
+      // 배치 채점 자체가 실패한 경우 — Pass 처리
+      qaResults.push({ scene_id: sceneId, type: scene.type || 'UNKNOWN', final_score: 100, status: 'pass_fallback' });
+      continue;
     }
 
-    if (!scenePassed) {
-      // 3회 시도 후에도 미통과 — 최종 교정 상태로 덮어쓰되 failed 기록
-      console.log(`   ❌ ${sceneId} 3회 시도 후에도 ${lastScore}/100 — 최종 교정본으로 저장`);
-      scene.visual_prompt_en = currentPrompt;
-      scene.negative_prompt  = currentNegative;
-      failedCount++;
-      qaResults.push({
-        scene_id: sceneId,
-        type: sceneType,
-        final_score: lastScore,
-        status: 'failed_after_retry',
-        deductions: lastDeductions,
-        corrected_visual_prompt_en: currentPrompt,
-      });
+    const scored = scoringResults.find(r => r.scene_id === sceneId) ?? scoringResults[i];
+    if (!scored) {
+      qaResults.push({ scene_id: sceneId, type: scene.type || 'UNKNOWN', final_score: 100, status: 'pass_not_found' });
+      continue;
+    }
+
+    const score   = scored.total ?? 0;
+    const verdict = scored.verdict ?? (score >= CUTLINE ? 'Pass' : 'Fix');
+
+    if (verdict === 'Pass' || score >= CUTLINE) {
+      process.stdout.write(`   ✅ ${sceneId} [${scene.type || '?'}] ${score}/100\n`);
+      qaResults.push({ scene_id: sceneId, type: scene.type || 'UNKNOWN', final_score: score, status: 'pass' });
     } else {
-      qaResults.push({
-        scene_id: sceneId,
-        type: sceneType,
-        final_score: lastScore ?? 100,
-        status: fixedCount > 0 && lastScore !== null ? 'fixed' : 'pass',
+      console.log(`   ⚠️ ${sceneId} [${scene.type || '?'}] ${score}/100 < ${CUTLINE} — 교정 대기`);
+      (scored.deductions || []).forEach(d => console.log(`      ${d}`));
+      failedItems.push({
+        sceneId,
+        sceneType: scene.type || 'UNKNOWN',
+        currentPrompt:   scene.visual_prompt_en || '',
+        currentNegative: scene.negative_prompt  || '',
+        deductions:      scored.deductions         || [],
+        fixInstructions: scored.autofix_instructions || [],
+        score,
+        sceneRef: scene,
       });
     }
+  }
 
-    // API rate limit 보호
-    await new Promise(r => setTimeout(r, 500));
+  // STEP 3: 실패 씬 배치 교정 (API 1회)
+  if (failedItems.length > 0) {
+    console.log(`\n🔧 [Visual QA] ${failedItems.length}개 씬 배치 교정 (Claude 1회 호출)...`);
+    try {
+      const fixPrompt = buildBatchFixPrompt(failedItems);
+      const fixResult = await client.messages.create({
+        model: QA_MODEL,
+        max_tokens: 8192,
+        temperature: 0.3,
+        messages: [{ role: 'user', content: fixPrompt }],
+      });
+      const fixText = fixResult.content[0]?.text ?? '';
+      const fixRaw  = fixText.match(/\[[\s\S]*\]/)?.[0];
+      if (!fixRaw) throw new Error('배치 교정 JSON 배열 없음');
+      const fixes = JSON.parse(fixRaw);
+
+      for (const fix of fixes) {
+        const item = failedItems.find(f => f.sceneId === fix.scene_id);
+        if (!item) continue;
+        if (fix.corrected_visual_prompt_en) item.sceneRef.visual_prompt_en = fix.corrected_visual_prompt_en;
+        if (fix.corrected_negative_prompt)  item.sceneRef.negative_prompt  = fix.corrected_negative_prompt;
+        console.log(`   ✅ ${fix.scene_id} 교정 적용 완료`);
+        fixedCount++;
+        qaResults.push({
+          scene_id: fix.scene_id, type: item.sceneType,
+          final_score: item.score, status: 'fixed',
+          corrected_visual_prompt_en: fix.corrected_visual_prompt_en,
+        });
+      }
+
+      // 교정 결과 없는 실패 씬 → failed 기록
+      for (const item of failedItems) {
+        if (!fixes.find(f => f.scene_id === item.sceneId)) {
+          console.log(`   ❌ ${item.sceneId} 교정 결과 없음 — 원본 유지`);
+          failedCount++;
+          qaResults.push({
+            scene_id: item.sceneId, type: item.sceneType,
+            final_score: item.score, status: 'failed_after_retry',
+            deductions: item.deductions,
+          });
+        }
+      }
+    } catch (err) {
+      console.warn(`⚠️ [Visual QA] 배치 교정 실패 — 원본 프롬프트 유지 (${err.message.slice(0, 120)})`);
+      for (const item of failedItems) {
+        failedCount++;
+        qaResults.push({
+          scene_id: item.sceneId, type: item.sceneType,
+          final_score: item.score, status: 'failed_after_retry',
+          deductions: item.deductions,
+        });
+      }
+    }
   }
 
   // ══════════════════════════════════════════════════════════════════════════
