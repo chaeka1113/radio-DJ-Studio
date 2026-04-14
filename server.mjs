@@ -19,6 +19,9 @@ const ai = new GoogleGenAI({ apiKey: API_KEY });
 /** Active episode ID — set once per pipeline run in /api/generate-scripts */
 let currentEpId = null;
 
+/** 이미지 생성 프로세스 중복 실행 방지용 플래그 */
+let imageGenRunning = false;
+
 const app = express();
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -180,6 +183,10 @@ app.post('/api/generate-scripts', async (req, res) => {
   sse.log('✅ [Planner] ref_episode_contract.json 생성 완료');
 
   // STEP 1: Script + QA 자동 피드백 루프 (최대 3회)
+  // 동일 EP_ID(같은 분 내 재실행) 잔류 파일 제거 — 항상 깨끗하게 시작
+  if (fs.existsSync(P.qaResult))   fs.unlinkSync(P.qaResult);
+  if (fs.existsSync(P.qaFeedback)) fs.unlinkSync(P.qaFeedback);
+
   let qaPass = false;
   for (let attempt = 1; attempt <= 3; attempt++) {
     sse.log(`✍️ [Script] 대본 생성 (시도 ${attempt}/3)...`);
@@ -270,7 +277,14 @@ app.post('/api/generate-storyboard', async (req, res) => {
 
 // 05 이미지 생성
 app.post('/api/generate-images', (req, res) => {
-  const sse    = sseStream(res);
+  const sse = sseStream(res);
+
+  // 이중 실행 방지: 이미 이미지 생성 중이면 차단
+  if (imageGenRunning) {
+    sse.log('⚠️ 이미지 생성이 이미 진행 중입니다. 완료 후 다시 시도하세요.');
+    return sse.done(1);
+  }
+
   const { force } = req.body || {};
   const P = getP();
   if (force && fs.existsSync(P.images)) {
@@ -278,54 +292,42 @@ app.post('/api/generate-images', (req, res) => {
     fs.mkdirSync(P.images, { recursive: true });
     sse.log('🗑 기존 이미지 폴더 삭제 완료 → 전체 재생성 시작');
   }
-  runScript(sse, 'run_05_images.mjs').then(code => sse.done(code));
+
+  imageGenRunning = true;
+  runScript(sse, 'run_05_images.mjs')
+    .then(code => sse.done(code))
+    .catch(err => { sse.err(`예외: ${err.message}`); sse.done(1); })
+    .finally(() => { imageGenRunning = false; });
 });
 
-// 07 오디오 → (자동 연결) 08 켄 번스 → 10 최종 편집
+// 07 오디오 → 06 CapCut 프로젝트 빌드
 app.post('/api/generate-audio-script', async (req, res) => {
   const sse = sseStream(res);
 
   const audioCode = await runScript(sse, 'run_07_audio.mjs');
   if (audioCode !== 0) return sse.done(audioCode);
 
-  sse.log('🎬 [켄 번스] 씬별 영상 생성 중... (CPU만 사용, 시간 소요)');
-  const kbCode = await runScript(sse, 'run_08_kenburns.mjs');
-  if (kbCode !== 0) {
-    sse.log('⚠️ [켄 번스] 실패 — 최종 영상 조립 건너뜀');
-    return sse.done(kbCode);
+  sse.log('🎬 [CapCut] 프로젝트 빌드 중...');
+  const capcutCode = await runScript(sse, 'run_06_capcut_builder.mjs');
+  if (capcutCode !== 0) {
+    sse.log('⚠️ [CapCut] 빌드 실패');
+    return sse.done(capcutCode);
   }
-  sse.log('✅ [켄 번스] 완료');
-
-  sse.log('🎞 [편집] 최종 영상 조립 중...');
-  const editorCode = await runScript(sse, 'run_10_editor.mjs');
-  if (editorCode !== 0) {
-    sse.log('⚠️ [편집] 최종 영상 조립 실패');
-    return sse.done(editorCode);
-  }
-  sse.log('✅ [편집] 완료 — videos/ 에 결과물 저장됨');
+  sse.log('✅ [CapCut] 완료 — capcut/ 에 draft_content.json 저장됨');
 
   sse.done(0);
 });
 
-// 08 켄 번스 영상 (개별 실행)
-app.post('/api/generate-kenburns', (req, res) => {
-  const sse = sseStream(res);
-  runScript(sse, 'run_08_kenburns.mjs').then(code => sse.done(code));
-});
-
-// 10 최종 영상 조립 (개별 실행)
-app.post('/api/generate-final-video', (req, res) => {
-  const sse = sseStream(res);
-  runScript(sse, 'run_10_editor.mjs').then(code => sse.done(code));
-});
-
 // ─── 이미지 단일 재생성 ───────────────────────────────────────────────────────
+// run_05_images.mjs의 buildPrompt와 동일한 구조로 CHARACTER LOCK 적용
 
 app.post('/api/regenerate-image', async (req, res) => {
   const { scene_id } = req.body;
   if (!scene_id) return res.status(400).json({ error: 'scene_id 필요' });
 
   const P = getP();
+
+  // 스토리보드 로드
   const storyboard = (() => {
     if (!fs.existsSync(P.storyboard)) return null;
     return JSON.parse(fs.readFileSync(P.storyboard, 'utf-8'));
@@ -338,28 +340,107 @@ app.post('/api/regenerate-image', async (req, res) => {
   const scene = scenes.find(s => s.scene_id === scene_id);
   if (!scene) return res.status(404).json({ error: `씬 ${scene_id} 없음` });
 
-  const STYLE        = ' Showa retro anime illustration, Studio Ghibli warm color palette, warm amber cinematic lighting, masterpiece, best quality, highly detailed, 8k, 16:9.';
-  const FALLBACK_NEG = 'photorealistic, 3d render, realistic, photography, highly detailed skin, cyberpunk, transformer, modern style, neon colors, glossy texture, plastic texture, abstract, moles, beauty marks, glasses, spectacles, nsfw, blurry, watermark, western features';
-  const positivePrompt = scene.visual_prompt_en + STYLE;
-  const negativePrompt = scene.negative_prompt || FALLBACK_NEG;
-  const fullPrompt     = `${positivePrompt}\n\nDo NOT include in the image: ${negativePrompt}`;
+  // 캐릭터 DNA 로드 (run_05와 동일 방식)
+  const DJ_DNA = 'A consistent character named Tenki-jii: a battered retro tin robot DJ with a square boxy head, cracked silver paint with rust spots and dents, single glowing amber mono-eye lens, two bent antennae on top of head each with small colored flags attached, faded red chest panel with analog dials, gauges, and blinking indicator lights, worn silver mechanical arms with visible ball-joint connections, always seated behind a vintage Showa-era wooden radio desk loaded with vinyl record stacks, old vacuum tube amplifiers, and a large retro microphone. NEVER change: square boxy head shape, amber mono-eye, rust-spotted silver body, faded red chest panel, bent antennae.';
+
+  let mainDna = null;
+  let secondaryChars = [];
+  if (fs.existsSync(P.characterPrompts)) {
+    const charData = JSON.parse(fs.readFileSync(P.characterPrompts, 'utf-8'));
+    const epChar = (charData.characters ?? []).find(c => c.episode_id === scene.episode_id);
+    if (epChar) {
+      mainDna = epChar.character_seed?.trim() ?? null;
+      secondaryChars = (epChar.secondary_characters ?? []);
+    }
+  }
+
+  const isDJ = scene.type === 'DJ_SHOT' || scene.speaker === 'TENKI_JII';
+  const dna   = isDJ ? DJ_DNA : mainDna;
+  const isFlashback = scene.type === 'FLASHBACK';
+
+  // CHARACTER LOCK 블록 구성
+  function charLockBlock(seed, isFlash) {
+    if (!seed) return '';
+    if (isFlash) {
+      return [
+        '=== MAIN CHARACTER (YOUNGER VERSION — FLASHBACK) ===',
+        seed,
+        'FLASHBACK OVERRIDES: smooth youthful face, no wrinkles, thick dark hair, energetic posture.',
+        '=== END MAIN CHARACTER ===',
+      ].join('\n');
+    }
+    return [
+      '=== MAIN CHARACTER LOCK ===',
+      seed,
+      'LOCK — NEVER change: face structure, hair, clothing, body proportions.',
+      '=== END MAIN CHARACTER LOCK ===',
+    ].join('\n');
+  }
+
+  const SCENE_TYPE_STYLE = {
+    ESTABLISHING:    'Wide establishing shot, environment-focused, expansive scenery.',
+    CHARACTER_SCENE: 'Medium shot framing character from waist up.',
+    CLOSE_UP:        "Extreme close-up on character's face, shallow depth of field.",
+    FLASHBACK:       'Soft warm sepia color grading, desaturated nostalgic tone, dreamlike soft focus.',
+    DJ_SHOT:         'Medium studio shot, vintage radio desk prominent in foreground.',
+  };
+
+  const STYLE_BASE = 'Showa retro anime illustration in the style of Studio Ghibli. Warm color palette: amber, dusty rose, faded navy. Soft cinematic lighting. Masterpiece quality, highly detailed, 8k.';
+  const NO_TEXT    = 'CRITICAL: Do NOT include ANY text, letters, subtitles, captions, Japanese/Chinese/Korean text, typography, or signs with readable text.';
+  const GLOBAL_NEG = 'photorealistic, 3D render, realistic photograph, hyperrealistic, modern style, cyberpunk, neon colors, glossy texture, nsfw, blurry, watermark, western features, text, letters, subtitles, captions, japanese text, korean text, typography';
+
+  const parts = [];
+
+  const mainLock = charLockBlock(dna, isFlashback);
+  if (mainLock) parts.push(mainLock, '');
+
+  // 보조 캐릭터 감지
+  const haystack = (scene.visual_prompt_en ?? '').toLowerCase();
+  const matchedSec = secondaryChars.filter(sc =>
+    (sc.detection_keywords ?? []).some(kw => haystack.includes(kw.toLowerCase()))
+  );
+  matchedSec.forEach(sc => {
+    if (sc.character_seed) {
+      parts.push(
+        `=== SECONDARY CHARACTER: ${sc.character_name ?? sc.character_key} ===`,
+        sc.character_seed,
+        'LOCK — render with IDENTICAL appearance, distinct from other characters.',
+        `=== END SECONDARY CHARACTER: ${sc.character_name ?? sc.character_key} ===`,
+        ''
+      );
+    }
+  });
+
+  parts.push('=== SCENE DESCRIPTION ===');
+  if (SCENE_TYPE_STYLE[scene.type]) parts.push(SCENE_TYPE_STYLE[scene.type]);
+  if (scene.camera_direction)       parts.push(`Camera framing: ${scene.camera_direction}.`);
+  if (scene.japanese_dialogue?.trim()) parts.push(`Emotional moment: "${scene.japanese_dialogue.trim()}"`);
+  parts.push(scene.visual_prompt_en ?? '');
+  parts.push('=== END SCENE ===', '');
+
+  parts.push('=== STYLE ===', STYLE_BASE, '=== END STYLE ===', '');
+  parts.push('=== FORBIDDEN ===', NO_TEXT);
+  const sceneNeg = scene.negative_prompt?.trim() ?? '';
+  parts.push(`Also avoid: ${sceneNeg ? `${sceneNeg}, ` : ''}${GLOBAL_NEG}`);
+  parts.push('=== END FORBIDDEN ===');
+
+  const fullPrompt = parts.join('\n');
 
   try {
     const result = await ai.models.generateContent({
       model: 'gemini-2.5-flash-image',
-      contents: fullPrompt,
+      contents: [{ text: fullPrompt }],
       config: {
         responseModalities: ['TEXT', 'IMAGE'],
         imageConfig: { aspectRatio: '16:9' },
       },
     });
-    const parts  = result.candidates?.[0]?.content?.parts ?? [];
-    const imgPart = parts.find(p => p.inlineData?.mimeType?.startsWith('image/'));
+    const imgParts = result.candidates?.[0]?.content?.parts ?? [];
+    const imgPart  = imgParts.find(p => p.inlineData?.mimeType?.startsWith('image/'));
     if (!imgPart) throw new Error('이미지 데이터 없음');
-    const b64 = imgPart.inlineData.data;
 
     fs.mkdirSync(P.images, { recursive: true });
-    fs.writeFileSync(path.join(P.images, `${scene_id}.png`), Buffer.from(b64, 'base64'));
+    fs.writeFileSync(path.join(P.images, `${scene_id}.png`), Buffer.from(imgPart.inlineData.data, 'base64'));
     res.json({ success: true, scene_id, url: `/output/${currentEpId}/images/${scene_id}.png?t=${Date.now()}` });
   } catch (err) {
     res.status(500).json({ error: err.message });

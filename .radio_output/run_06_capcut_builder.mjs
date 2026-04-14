@@ -61,12 +61,12 @@ const T_STICKER    = tmats.stickers[0];
 const RETRO_FLICKER_EFFECT_ID = '7618619632592620805';
 const _retroFlicker = tmats.video_effects.find(e => e.effect_id === RETRO_FLICKER_EFFECT_ID);
 if (!_retroFlicker) {
-  console.error(
-    '❌ 마스터 템플릿에 레트로 플리커 효과가 없습니다.\n' +
-    'CapCut에서 해당 효과를 적용한 뒤 마스터를 다시 추출하세요.'
-  );
+  console.error('❌ 마스터 템플릿에 레트로 플리커 효과가 없습니다.');
+  console.error('   CapCut → 비디오 클립에 "레트로 플리커" 효과 적용 후 마스터를 다시 추출하세요.');
+  console.error(`   현재 템플릿의 효과 목록: ${tmats.video_effects.map(e => `${e.name ?? '?'}(${e.effect_id})`).join(', ')}`);
   process.exit(1);
 }
+const ACTIVE_FLICKER_ID = RETRO_FLICKER_EFFECT_ID;
 
 const T_VE = {
   RETRO_FLICKER: _retroFlicker,
@@ -150,6 +150,7 @@ const LEAD_DUR      = Math.max(TAPE_DUR, NOISE_CLIP_US); // radio+tape 완료까
 // chunk 역할 분류
 const openingChunk = orderedChunks.find(c => c.type === 'opening');
 const closingChunk = orderedChunks.find(c => c.type === 'qa_and_closing');
+const hasQA = closingChunk !== null;  // QA/closing 오디오 존재 여부
 const epChunksMap  = {};
 for (const c of orderedChunks) {
   if (c.ep) {
@@ -200,12 +201,14 @@ for (const ep of epNums) {
   }
 }
 
-// SEGMENT D: Closing TTS (이미지 없음 — 검은 화면 + 2초 암전 후 Noise Out)
+// SEGMENT D: Closing/QA TTS — Radio noise 리드인 + QA 및 엔딩 DJ 씬 표시
 if (closingChunk) {
-  const ttsStart = cursor;
-  const ttsEnd   = ttsStart + closingChunk.durUs;
-  timelineBlocks.push({ type: 'closing', chunk: closingChunk, sceneStart: null, sceneEnd: null, ttsStart, ttsEnd, leadDur: 0 });
-  cursor = ttsEnd + BREATHING_ROOM;  // 클로징 후 2초 암전 여백
+  const sceneStart = cursor;
+  const ttsStart   = cursor + LEAD_DUR;  // Radio noise 2s 리드인
+  const ttsEnd     = ttsStart + closingChunk.durUs;
+  const sceneEnd   = ttsEnd + BREATHING_ROOM;  // 마지막 씬 +2초 연장
+  timelineBlocks.push({ type: 'closing', chunk: closingChunk, sceneStart, sceneEnd, ttsStart, ttsEnd, leadDur: LEAD_DUR });
+  cursor = sceneEnd;
 }
 
 // Noise Out 시작 = 모든 콘텐츠 완전 종료 직후 (검은 화면 아웃트로)
@@ -281,7 +284,8 @@ function calcSceneDurations(chunkId, sceneCount) {
   return durs;
 }
 
-// 스토리보드 씬을 그룹화 (episode_id 기준, 기존 로직 유지)
+// 스토리보드 씬을 그룹화
+// QA_SHOT(qa_shot:true) / closing_shot:true 씬은 새 그룹 시작 → closingChunk와 1:1 매핑
 const storyboard = JSON.parse(fs.readFileSync(P.storyboard, 'utf-8'));
 const sbScenes   = storyboard.scenes;
 
@@ -289,12 +293,20 @@ const sceneGroups = [];
 let cg = null;
 let djIdx = 0;
 let prevIsDJ = false;
+let prevIsQACls = false;
 for (const s of sbScenes) {
-  const isDJ  = s.type === 'DJ_SHOT';
+  const isDJ     = s.type === 'DJ_SHOT';
+  const isQACls  = Boolean(s.qa_shot || s.closing_shot);  // QA/closing 경계 마커
+
+  // djIdx 증가: 비DJ→DJ 전환 OR 일반DJ→QA/closing 전환
   if (isDJ && !prevIsDJ) djIdx++;
+  else if (isDJ && prevIsDJ && isQACls && !prevIsQACls) djIdx++;
+
   const epKey = isDJ ? null : (s.episode_id || null);
   const gKey  = isDJ ? 'dj_' + djIdx : 'ep' + epKey;
-  prevIsDJ = isDJ;
+  prevIsDJ    = isDJ;
+  prevIsQACls = isQACls;
+
   if (!cg || cg._key !== gKey) {
     if (cg) sceneGroups.push(cg);
     cg = { _key: gKey, isDJ, scenes: [s] };
@@ -653,7 +665,7 @@ const effectSegs4 = [];  // 80s Tape
 const stickerSegs = [];
 
 for (const block of timelineBlocks) {
-  if (block.type === 'opening' || block.type === 'dj') {
+  if (block.type === 'opening' || block.type === 'dj' || block.type === 'closing') {
     // 1. TAPE_80S: sceneStart에서 시작, TAPE_DUR만큼 (Radio noise와 동시 재생)
     effectSegs4.push(makeEffectSegment({
       materialId: T_VE.TAPE_80S.id,
@@ -736,10 +748,10 @@ function makeSoundMat(refMat, name, type = 'sound') {
   };
 }
 
-// ── Radio noise: 각 오프닝/DJ 리드인 sceneStart 시점에 NOISE_CLIP_US(2s) ──
-// SEGMENT A: cursor=0에, SEGMENT C: story_end 직후에 배치
+// ── Radio noise: 각 오프닝/DJ/closing 리드인 sceneStart 시점에 NOISE_CLIP_US(2s) ──
+// SEGMENT A: cursor=0에, SEGMENT C: story_end 직후에, SEGMENT D: ep3_dj_end 직후에 배치
 const radioNoiseSegs = [];
-for (const block of timelineBlocks.filter(b => b.type === 'opening' || b.type === 'dj')) {
+for (const block of timelineBlocks.filter(b => b.type === 'opening' || b.type === 'dj' || b.type === 'closing')) {
   const mat = makeSoundMat(REF.radio_noise, 'Radio noise');
   const aux = makeAudioAuxRefs();
   addAux(aux);
@@ -756,7 +768,7 @@ for (const block of timelineBlocks.filter(b => b.type === 'opening' || b.type ==
 const pcClickSegs = [];
 
 // ── BGM: 각 사연 구간 — White In 시작 ~ Story TTS 종료, 루핑 ──
-// SEGMENT B: bgmStart = sceneStart (White In 시작점), bgmEnd = ttsEnd
+// SEGMENT B: bgmStart = sceneStart (White In 시작점), bgmEnd = sceneEnd (BREATHING_ROOM 포함)
 const track7Segs = [];
 const bgmActualDurUs = REF.bgm.duration;
 const BGM_MARGIN_US  = 10_000_000;
@@ -765,7 +777,7 @@ const BGM_SRC_DUR_US = Math.max(bgmActualDurUs - BGM_MARGIN_US, 1_000_000);
 
 for (const block of timelineBlocks.filter(b => b.type === 'story')) {
   const bgmStart = block.sceneStart;  // White In 시작점
-  const bgmEnd   = block.ttsEnd;      // Story TTS 종료점
+  const bgmEnd   = block.sceneEnd;    // Story TTS 종료 + BREATHING_ROOM (2s 텀 BGM 채움)
 
   let cur = bgmStart;
   while (cur < bgmEnd) {
@@ -993,7 +1005,7 @@ function validateTimeline(draft) {
   const veMap = {};
   for (const ve of draft.materials.video_effects) veMap[ve.id] = ve.effect_id;
   // QA 1: Radio noise 종료 <= DJ TTS 시작 (겹침 금지)
-  for (const block of timelineBlocks.filter(b => b.type === 'opening' || b.type === 'dj')) {
+  for (const block of timelineBlocks.filter(b => b.type === 'opening' || b.type === 'dj' || b.type === 'closing')) {
     const radioEnd   = block.sceneStart + NOISE_CLIP_US;
     const djTtsStart = block.ttsStart;
     if (radioEnd > djTtsStart)
@@ -1010,12 +1022,12 @@ function validateTimeline(draft) {
   }
 
   // QA 3: WAVE 스티커 + 레트로 플리커 == 정확히 DJ TTS 구간
-  for (const block of timelineBlocks.filter(b => b.type === 'opening' || b.type === 'dj')) {
+  for (const block of timelineBlocks.filter(b => b.type === 'opening' || b.type === 'dj' || b.type === 'closing')) {
     const djStart = block.ttsStart;
     const djDur   = block.chunk.durUs;
 
     const matchBN = allEffectSegs.find(s =>
-      veMap[s.material_id] === RETRO_FLICKER_EFFECT_ID &&
+      veMap[s.material_id] === ACTIVE_FLICKER_ID &&
       s.target_timerange.start === djStart &&
       s.target_timerange.duration === djDur
     );
@@ -1067,8 +1079,8 @@ function validateTimeline(draft) {
     const bgmEnd   = Math.max(...bgmForBlock.map(s => s.target_timerange.start + s.target_timerange.duration));
     if (bgmStart > block.sceneStart)
       errors.push(`QA6 [BGM] EP${block.ep}: BGM 시작(${(bgmStart/1e6).toFixed(2)}s) > White In 시작(${(block.sceneStart/1e6).toFixed(2)}s)`);
-    if (bgmEnd < block.ttsEnd)
-      errors.push(`QA6 [BGM] EP${block.ep}: BGM 종료(${(bgmEnd/1e6).toFixed(2)}s) < Story TTS 종료(${(block.ttsEnd/1e6).toFixed(2)}s)`);
+    if (bgmEnd < block.sceneEnd)
+      errors.push(`QA6 [BGM] EP${block.ep}: BGM 종료(${(bgmEnd/1e6).toFixed(2)}s) < 씬 종료+2s(${(block.sceneEnd/1e6).toFixed(2)}s)`);
   }
 
   if (errors.length > 0) {

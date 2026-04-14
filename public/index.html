@@ -182,6 +182,21 @@ let currentScriptsData = null;
 let currentDjData = null;
 let currentAudioText = '';
 let storyboardScenes = [];
+let currentEpId = null;
+
+// EP_ID 동기화 — 서버의 currentEpId를 주기적으로 polling
+async function syncEpId() {
+  try {
+    const r = await fetch('/api/current-ep');
+    if (r.ok) {
+      const d = await r.json();
+      currentEpId = d.ep_id || null;
+    }
+  } catch {}
+}
+// 페이지 로드 즉시 + 30초마다 갱신
+syncEpId();
+setInterval(syncEpId, 30000);
 
 // ─── Tab Management ──────────────────────────────────────────────────────────
 function setTab(tab) {
@@ -519,7 +534,7 @@ function renderGallery(results) {
     ${results.map(item => {
       const scene = sceneMap[item.scene_id] || {};
       const isOk = item.status === 'success' || item.status === 'skipped';
-      const imgUrl = isOk ? `/output/images/${item.scene_id}.png` : '';
+      const imgUrl = isOk && currentEpId ? `/output/${currentEpId}/images/${item.scene_id}.png` : '';
       const dialogue = scene.japanese_dialogue || scene.visual_prompt_en?.slice(0, 80) || '';
       return `
       <div class="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden hover:border-amber-500 transition-colors" id="card-${item.scene_id}">

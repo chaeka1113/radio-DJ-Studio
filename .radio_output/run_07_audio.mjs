@@ -48,7 +48,11 @@ if (HAS_FFMPEG) {
 }
 
 // ── API 및 Voice ID 설정 ───────────────────────────────────────────────────────
-const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || 'sk_0f089322686eda662ba5452ae27651d21be4cacb244e647d';
+const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
+if (!ELEVENLABS_API_KEY) {
+  console.error('❌ ELEVENLABS_API_KEY 환경변수 없음 — .env 파일 확인');
+  process.exit(1);
+}
 const DJ_VOICE_ID = 'm0Fo0JrIVm57nweV2EuR';
 
 function getCallerVoiceId(ageStr, genderStr) {
@@ -177,7 +181,12 @@ async function callElevenLabs(text, voiceId, voiceSettings) {
 }
 
 // ── 청크 배열 구성 ─────────────────────────────────────────────────────────────
-const [ep1, ep2, ep3] = djScript.episodes;
+const djEpisodes = djScript.episodes ?? [];
+if (djEpisodes.length < 3) {
+  console.error(`❌ 02_dj_script.json에 에피소드 ${djEpisodes.length}개뿐 — 최소 3개 필요`);
+  process.exit(1);
+}
+const [ep1, ep2, ep3] = djEpisodes;
 
 // V3 최적화 음성 설정
 const DJ_VOICE_SETTINGS     = { stability: 0.38, similarity_boost: 0.80, style: 0.65, use_speaker_boost: true };

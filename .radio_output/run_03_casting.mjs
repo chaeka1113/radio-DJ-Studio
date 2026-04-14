@@ -2,7 +2,6 @@ import Anthropic from '@anthropic-ai/sdk';
 import fs from 'fs';
 import { loadEnv, requireEnv } from './lib/env.mjs';
 import { generateEpId, makePaths, ensureDirs } from './lib/paths.mjs';
-// (withRetry 불필요 — Claude SDK 직접 호출)
 
 loadEnv();
 const epId = process.env.EP_ID ?? generateEpId();
@@ -24,9 +23,10 @@ const characters = [];
 
 for (const ep of djScript.episodes) {
   const char = ep.character;
-  console.log(`🎨 EP${ep.id} 캐릭터 시드 생성: ${char.name} (${char.personality_type})`);
+  console.log(`🎨 EP${ep.id} 주인공 시드 생성: ${char.name} (${char.personality_type})`);
 
-  const prompt = `
+  // ── 1) 주인공 캐릭터 시드 생성 ─────────────────────────────────────────────
+  const mainPrompt = `
 【전역 규칙 — 파이프라인 전체 적용】
 ${globalRules}
 
@@ -95,7 +95,7 @@ Output JSON only:
         model: CAST_MODEL,
         max_tokens: 8192,
         temperature: 0.7,
-        messages: [{ role: 'user', content: prompt }],
+        messages: [{ role: 'user', content: mainPrompt }],
       });
       const text = message.content[0]?.text ?? '';
       const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -105,20 +105,108 @@ Output JSON only:
       break;
     } catch (err) {
       const msg = err.message ?? '';
-      // 일일 한도 — 재시도 무의미, 즉시 중단
       if (msg.includes('credit balance') || err.status === 529) {
         console.error(`   ❌ Claude API 크레딧 부족 — 즉시 중단`);
         process.exit(1);
       }
-      console.warn(`   ⚠️ EP${ep.id} 시도 ${attempt + 1}/3 실패: ${msg.slice(0, 200)}`);
-      if (attempt >= 2) { console.error(`   ❌ EP${ep.id} 캐릭터 시드 생성 실패`); }
+      console.warn(`   ⚠️ EP${ep.id} 주인공 시도 ${attempt + 1}/3 실패: ${msg.slice(0, 200)}`);
+      if (attempt >= 2) { console.error(`   ❌ EP${ep.id} 주인공 시드 생성 실패`); }
       else await new Promise(r => setTimeout(r, 5000));
     }
   }
-  if (charData) {
-    characters.push(charData);
-    console.log(`   ✅ 시드: ${charData.character_seed.slice(0, 60)}...`);
+
+  if (!charData) {
+    await new Promise(r => setTimeout(r, 2000));
+    continue;
   }
+  console.log(`   ✅ 주인공 시드: ${charData.character_seed.slice(0, 60)}...`);
+
+  // ── 2) 보조 캐릭터 시드 생성 ───────────────────────────────────────────────
+  console.log(`🎭 EP${ep.id} 보조 캐릭터 추출 중...`);
+
+  const scriptText = ep.script ?? '';
+
+  const secondaryPrompt = `
+You are a Visual Character Designer analyzing a Japanese radio drama script.
+
+Your task:
+1. Read the script below and identify ALL secondary characters who appear more than once or play a meaningful role in the story.
+2. For each secondary character, create a FIXED CHARACTER SEED for visual consistency across scenes.
+3. Generate detection_keywords (English phrases) that would appear in an AI image generation prompt describing that character in a scene.
+
+Script (Episode ${ep.id} — "${ep.title}"):
+---
+${scriptText}
+---
+
+Main protagonist (EXCLUDE from your output — already handled separately):
+- Name: ${char.name}, Age: ${char.age}
+
+## RULES FOR SECONDARY CHARACTER SEEDS:
+1. Each seed must be in English, minimum 40 words
+2. Describe age, gender, face structure, hair, body type, clothing
+3. Use ABSOLUTE STATE language ("clean smooth skin") — NO negative-form ("no moles")
+4. DO NOT mention glasses/spectacles unless explicitly stated in script
+5. Art style context: Showa retro anime, Studio Ghibli illustration
+
+## RULES FOR DETECTION_KEYWORDS:
+- These are English phrases that an image generation prompt would use when this character appears in a scene
+- Must be specific enough to avoid false matches (e.g. "his father" not just "man")
+- Include 3-6 keywords per character
+- They will be matched against scene visual_prompt_en using substring search
+
+Output JSON only (array, can be empty [] if no meaningful secondary characters):
+[
+  {
+    "character_key": "short_snake_case_id (e.g. father, mother, younger_brother, sento_grandmother)",
+    "character_name": "Japanese name or role label",
+    "role": "relationship to protagonist (e.g. 父親, 母親, 弟, 銭湯の番台)",
+    "character_seed": "English visual description seed, 40+ words",
+    "detection_keywords": ["english phrase 1", "english phrase 2", "english phrase 3"]
+  }
+]
+
+If there are no secondary characters worth seeding (e.g. only mentioned in passing), output: []
+`;
+
+  let secondaryChars = [];
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const message = await client.messages.create({
+        model: CAST_MODEL,
+        max_tokens: 8192,
+        temperature: 0.7,
+        messages: [{ role: 'user', content: secondaryPrompt }],
+      });
+      const text = message.content[0]?.text ?? '';
+      // JSON 배열 추출 (객체 안에 배열이 있거나 배열 자체일 수 있음)
+      const arrMatch = text.match(/\[[\s\S]*\]/);
+      if (!arrMatch) throw new Error('JSON 배열 없음');
+      secondaryChars = JSON.parse(arrMatch[0]);
+      if (!Array.isArray(secondaryChars)) throw new Error('배열이 아님');
+      console.log(`   ✅ 보조 캐릭터 ${secondaryChars.length}명 생성`);
+      secondaryChars.forEach(c => {
+        console.log(`      - ${c.character_key} (${c.role}): ${c.character_seed.slice(0, 50)}...`);
+      });
+      break;
+    } catch (err) {
+      const msg = err.message ?? '';
+      if (msg.includes('credit balance') || err.status === 529) {
+        console.error(`   ❌ Claude API 크레딧 부족 — 즉시 중단`);
+        process.exit(1);
+      }
+      console.warn(`   ⚠️ EP${ep.id} 보조 캐릭터 시도 ${attempt + 1}/3 실패: ${msg.slice(0, 200)}`);
+      if (attempt >= 2) {
+        console.error(`   ❌ EP${ep.id} 보조 캐릭터 생성 실패 — 빈 배열로 계속`);
+        secondaryChars = [];
+      } else {
+        await new Promise(r => setTimeout(r, 5000));
+      }
+    }
+  }
+
+  charData.secondary_characters = secondaryChars;
+  characters.push(charData);
 
   await new Promise(r => setTimeout(r, 2000));
 }
@@ -130,7 +218,7 @@ fs.writeFileSync(
 );
 console.log('✅ 03_character_prompts.json 저장 완료');
 
-// PATCH 5: ref_character_sheet.json 생성
+// ── ref_character_sheet.json 생성 ────────────────────────────────────────────
 const scripts01 = JSON.parse(fs.readFileSync(P.scripts, 'utf-8'));
 const CLOTHING_KEYWORDS = [
   'スニーカー', 'デニム', 'パーカー', 'ジャケット', 'スーツ', 'セーター', 'ワンピース',
@@ -142,10 +230,8 @@ const characterSheet = scripts01.episodes.map(ep => {
   const char = ep.character || {};
   const scriptText = ep.script || '';
 
-  // 복장 키워드 추출
   const foundOutfit = CLOTHING_KEYWORDS.filter(kw => scriptText.includes(kw));
 
-  // 외모 단서 추출
   const hasGlasses = /眼鏡|めがね|メガネ|glasses/.test(scriptText + JSON.stringify(char));
   const hairMatch = scriptText.match(/[^\s。、]*髪[^\s。、]*/);
   const bodyMatch = scriptText.match(/[^\s。、]*(体型|体格|太|痩|細)[^\s。、]*/);

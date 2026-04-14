@@ -152,12 +152,13 @@ Output JSON array only:
   let scenes = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const message = await client.messages.create({
+      const stream = client.messages.stream({
         model: SB_MODEL,
         max_tokens: 32768,
         temperature: 0.7,
         messages: [{ role: 'user', content: prompt }],
       });
+      const message = await stream.finalMessage();
       const text = message.content[0]?.text ?? '';
       const jsonMatch = text.match(/\[[\s\S]*\]/);
       if (!jsonMatch) throw new Error('JSON 배열 없음');
@@ -198,10 +199,10 @@ Output JSON array only:
       }
 
       allScenes.push({
-        scene_id: sc(),
         episode_id: ep.id,
         speaker: `NARRATOR (${ep.character.name}・${ep.character.age})`,
         ...s,
+        scene_id: sc(),   // Claude가 반환한 scene_id를 항상 SC###으로 덮어씀
       });
     });
     console.log(`   ✅ ${scenes.length}개 씬`);
@@ -217,28 +218,30 @@ Output JSON array only:
   // 트랜지션 멘트 (다음 에피소드 연결)
   if (ep.dj_transition) {
     allScenes.push(makeDJScene(ep.dj_transition, 'waving dismissively, turning to face camera'));
+  }
 
-    // QA 코너 삽입 (EP2 트랜지션 직후)
-    if (ep.id === 2 && hasQA) {
-      console.log('   ➕ QA 코너 DJ_SHOT 씬 5개 삽입');
-      const qaMotions = [
-        'arms crossed, looking annoyed, mono-eye squinting suspiciously',
-        'pointing finger accusingly at camera, jaw dropping in disbelief',
-        'slapping forehead with metallic clang expression, exasperated pose',
-        'leaning close to microphone intensely, mono-eye glowing bright',
-        'shrugging with begrudging warmth, mono-eye softening slightly',
-      ];
-      qaMotions.forEach((motion, i) => {
-        allScenes.push(makeDJScene(`即問即答コーナー — 質問${i + 1}`, motion));
-      });
-    }
+  // QA 코너 삽입 (EP3 직후 — 트랜지션 유무와 무관하게 삽입, 07_qa_and_closing 오디오와 정렬)
+  if (ep.id === 3 && hasQA) {
+    console.log('   ➕ QA 코너 QA_SHOT 씬 5개 삽입 (EP3 직후)');
+    const qaMotions = [
+      'arms crossed, looking annoyed, mono-eye squinting suspiciously',
+      'pointing finger accusingly at camera, jaw dropping in disbelief',
+      'slapping forehead with metallic clang expression, exasperated pose',
+      'leaning close to microphone intensely, mono-eye glowing bright',
+      'shrugging with begrudging warmth, mono-eye softening slightly',
+    ];
+    qaMotions.forEach((motion, i) => {
+      allScenes.push({ ...makeDJScene(`即問即答コーナー — 質問${i + 1}`, motion), qa_shot: true });
+    });
   }
 
   await new Promise(r => setTimeout(r, 3000));
 }
 
-// ── 방송 엔딩
-allScenes.push(makeDJScene(djScript.show_closing, 'leaning back warmly, mono-eye dimming gently, slow pan out', 'FADE_OUT'));
+// ── 방송 엔딩 (closing_shot: true → capcut builder가 별도 sceneGroup으로 분리)
+const _closingScene = makeDJScene(djScript.show_closing, 'leaning back warmly, mono-eye dimming gently, slow pan out', 'FADE_OUT');
+_closingScene.closing_shot = true;
+allScenes.push(_closingScene);
 
 const totalDuration = allScenes.reduce((s, sc) => s + sc.duration_sec, 0);
 const output = {

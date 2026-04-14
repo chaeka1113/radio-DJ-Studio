@@ -10,46 +10,233 @@ const P    = makePaths(epId);
 ensureDirs(P);
 const API_KEY = requireEnv('GEMINI_API_KEY');
 
-// "Nano Banana" = Gemini 2.5 Flash Image (Native Image Generation)
-const IMAGE_MODEL = 'gemini-2.5-flash-image';
+// ── 모델 설정 ─────────────────────────────────────────────────────────────────
+// gemini-2.5-flash-image: 저비용 고품질. imageSize 미지원, aspectRatio만 사용.
+const IMAGE_MODEL  = 'gemini-2.5-flash-image';
+const ASPECT_RATIO = '16:9';
 
+// ── 스토리보드 로드 ───────────────────────────────────────────────────────────
 const storyboard = JSON.parse(fs.readFileSync(P.storyboard, 'utf-8'));
-// flat 배열(신규) 또는 episodes[].scenes(구형) 모두 지원
 const scenes = storyboard.scenes
   ?? storyboard.episodes?.flatMap(ep => (ep.scenes || []).map(s => ({ ...s, episode_id: ep.episode_id ?? ep.id })))
   ?? [];
 
-// ── [Textual DNA] 사연 주인공 시드 맵 로드 ───────────────────────────────────
-// 03_character_prompts.json의 character_seed를 episode_id 기준으로 매핑
-// 캐스팅 단계에서 확정된 외모를 이미지 생성 단계에서 강제 재주입해 일관성 확보
-const episodeDNAMap = new Map();
+// ── 캐릭터 DNA 맵 (03_character_prompts.json) ────────────────────────────────
+// episodeDNAMap    : epId → 주인공 character_seed (string)
+// episodeSecondary : epId → [{ character_key, character_seed, detection_keywords[] }]
+const episodeDNAMap    = new Map();
+const episodeSecondary = new Map();
+
 if (fs.existsSync(P.characterPrompts)) {
   const charData = JSON.parse(fs.readFileSync(P.characterPrompts, 'utf-8'));
   (charData.characters ?? []).forEach(c => {
-    if (c.episode_id != null && c.character_seed) {
+    if (c.episode_id == null) return;
+    if (c.character_seed) {
       episodeDNAMap.set(c.episode_id, c.character_seed.trim());
     }
+    if (Array.isArray(c.secondary_characters) && c.secondary_characters.length > 0) {
+      episodeSecondary.set(c.episode_id, c.secondary_characters.map(sc => ({
+        character_key:      sc.character_key,
+        character_name:     sc.character_name ?? sc.character_key,
+        role:               sc.role ?? '',
+        character_seed:     (sc.character_seed ?? '').trim(),
+        detection_keywords: Array.isArray(sc.detection_keywords) ? sc.detection_keywords : [],
+      })));
+    }
   });
-  console.log(`🧬 캐릭터 DNA 로드: ${episodeDNAMap.size}개 에피소드`);
-} else {
-  console.warn('⚠️  03_character_prompts.json 없음 — 사연 주인공 DNA 주입 스킵');
+  const secCount = [...episodeSecondary.values()].reduce((s, arr) => s + arr.length, 0);
+  console.log(`🧬 캐릭터 DNA 로드: 주인공 ${episodeDNAMap.size}개 에피소드, 보조 ${secCount}명`);
 }
 
 const ai = new GoogleGenAI({ apiKey: API_KEY });
 
-// Gemini 2.5 Flash Image (Nano Banana) — new @google/genai SDK
-async function generateImageGemini(prompt, negativePrompt) {
-  // 네거티브 프롬프트를 텍스트 지시로 병합 (Gemini는 별도 파라미터 미지원)
-  const fullPrompt = negativePrompt
-    ? `${prompt}\n\nDo NOT include in the image: ${negativePrompt}`
-    : prompt;
+// ── テンキ爺 고정 DNA ─────────────────────────────────────────────────────────
+// 캐릭터 일관성을 위해 모든 DJ씬에 동일한 외형 잠금 설명 사용
+const DJ_DNA = [
+  'A consistent character named Tenki-jii: a battered retro tin robot DJ with a square boxy head,',
+  'cracked silver paint with rust spots and dents, single glowing amber mono-eye lens,',
+  'two bent antennae on top of head each with small colored flags attached,',
+  'faded red chest panel with analog dials, gauges, and blinking indicator lights,',
+  'worn silver mechanical arms with visible ball-joint connections and hydraulic tubes,',
+  'always seated behind a vintage Showa-era wooden radio desk loaded with vinyl record stacks,',
+  'old vacuum tube amplifiers, and a large retro microphone on a weighted stand.',
+  'NEVER change: square boxy head shape, amber mono-eye, rust-spotted silver body, faded red chest panel, bent antennae.',
+].join(' ');
 
+// ── 共通スタイル指示 ──────────────────────────────────────────────────────────
+const STYLE_BASE = [
+  'Showa retro anime illustration in the style of Studio Ghibli hand-drawn animation.',
+  'Warm color palette: amber, dusty rose, faded navy, sepia tones.',
+  'Soft cinematic lighting with gentle film grain.',
+  'Masterpiece quality, highly detailed, 8k resolution.',
+].join(' ');
+
+const NO_TEXT_RULE = [
+  'CRITICAL: Do NOT include ANY text, letters, words, subtitles, captions, labels,',
+  'Japanese text, Chinese text, Korean text, Hangul, Kanji, Hiragana, Katakana,',
+  'typography, font glyphs, writing, dialogue boxes, speech bubbles, or signs with readable text.',
+  'The image must contain ZERO readable characters of any language.',
+].join(' ');
+
+const GLOBAL_NEGATIVE = [
+  'photorealistic, 3D render, realistic photograph, hyperrealistic, CGI, modern style,',
+  'cyberpunk, neon colors, glossy plastic texture, abstract, moles, beauty marks,',
+  'glasses, spectacles, nsfw, blurry background on main subject, watermark,',
+  'western facial features, text, letters, words, subtitles, captions,',
+  'japanese text, chinese text, korean text, typography, font, writing,',
+  'dialogue box, speech bubble, signs with text.',
+].join(' ');
+
+// ── 씬 타입별 촬영 스타일 ─────────────────────────────────────────────────────
+const SCENE_TYPE_STYLE = {
+  ESTABLISHING:    'Wide establishing shot with expansive scenery. Characters are small figures in the environment. Focus on atmosphere and setting.',
+  CHARACTER_SCENE: 'Medium shot framing character from waist up. Expressive face and body language clearly visible.',
+  CLOSE_UP:        'Extreme close-up shot on the character\'s face. Intense emotional expression. Shallow depth of field with eyes in sharp focus.',
+  FLASHBACK:       'Soft warm sepia color grading with desaturated nostalgic tone. Gentle vignette around edges. Dreamlike soft focus atmosphere. Faded film look.',
+  DJ_SHOT:         'Medium studio shot with the vintage radio desk prominent in the foreground. Cozy amber-lit studio atmosphere with warm back lighting.',
+};
+
+// ── CHARACTER LOCK 블록 생성 ──────────────────────────────────────────────────
+// 주인공 / 보조 캐릭터 모두 동일한 섹션 구조로 주입
+// isFlashback=true 이면 주인공을 젊은 시절 버전으로 오버라이드
+function buildMainCharLock(dna, isFlashback) {
+  if (!dna) return '';
+
+  if (isFlashback) {
+    return [
+      '=== MAIN CHARACTER (YOUNGER VERSION — FLASHBACK) ===',
+      'Base appearance reference:',
+      dna,
+      'FLASHBACK OVERRIDES — render this character as their younger self:',
+      '  - Smooth youthful face, absolutely no wrinkles',
+      '  - Thick dark hair without any gray',
+      '  - Energetic upright posture, bright alert eyes',
+      '  - Same general face structure but decades younger',
+      '=== END MAIN CHARACTER ===',
+    ].join('\n');
+  }
+
+  return [
+    '=== MAIN CHARACTER LOCK (KEEP IDENTICAL ACROSS ALL SCENES) ===',
+    dna,
+    'LOCK — NEVER change these attributes:',
+    '  - Face structure, wrinkle pattern, expression lines',
+    '  - Hair color, length, and styling',
+    '  - Clothing outfit as described above',
+    '  - Body proportions and posture',
+    '=== END MAIN CHARACTER LOCK ===',
+  ].join('\n');
+}
+
+function buildSecondaryCharLock(secChar) {
+  if (!secChar.character_seed) return '';
+  return [
+    `=== SECONDARY CHARACTER: ${secChar.character_name} (${secChar.role}) ===`,
+    secChar.character_seed,
+    `LOCK — render ${secChar.character_name} with IDENTICAL appearance in every scene they appear:`,
+    '  - Same face, hair, clothing, and body proportions as described above',
+    '  - Maintain consistent visual identity; do NOT blend with other characters',
+    `=== END SECONDARY CHARACTER: ${secChar.character_name} ===`,
+  ].join('\n');
+}
+
+// ── 씬에 등장하는 보조 캐릭터 감지 ─────────────────────────────────────────
+// visual_prompt_en 안에 detection_keywords 중 하나라도 포함되면 해당 캐릭터 매칭
+function detectSecondaryChars(scene, epId) {
+  const secondary = episodeSecondary.get(epId) ?? [];
+  if (secondary.length === 0) return [];
+
+  const haystack = (scene.visual_prompt_en ?? '').toLowerCase();
+  return secondary.filter(sc =>
+    sc.detection_keywords.some(kw => haystack.includes(kw.toLowerCase()))
+  );
+}
+
+// ── プロンプト構築 ─────────────────────────────────────────────────────────────
+// 構造: [主人公LOCK] [보조캐릭터LOCK...] [SCENE] [STYLE] [FORBIDDEN]
+function buildPrompt(scene, dna, epId) {
+  const isFlashback = scene.type === 'FLASHBACK';
+
+  // 주인공 CHARACTER LOCK
+  const mainLock = buildMainCharLock(dna, isFlashback);
+
+  // 보조 캐릭터 CHARACTER LOCK (감지된 것만)
+  const matchedSecondary = detectSecondaryChars(scene, epId);
+  const secondaryLocks = matchedSecondary
+    .map(sc => buildSecondaryCharLock(sc))
+    .filter(Boolean);
+
+  // 씬 구성
+  const typeStyle   = SCENE_TYPE_STYLE[scene.type] ?? '';
+  const cameraCtx   = scene.camera_direction ? `Camera framing: ${scene.camera_direction}.` : '';
+  const dialogue    = scene.japanese_dialogue?.trim();
+  const dialogueCtx = dialogue ? `The scene depicts this emotional moment: "${dialogue}"` : '';
+  const sceneDesc   = scene.visual_prompt_en ?? '';
+
+  // 네거티브
+  const sceneNeg   = scene.negative_prompt?.trim() ?? '';
+  const combinedNeg = sceneNeg ? `${sceneNeg}, ${GLOBAL_NEGATIVE}` : GLOBAL_NEGATIVE;
+
+  // 조립
+  const parts = [];
+
+  if (mainLock) parts.push(mainLock, '');
+
+  if (secondaryLocks.length > 0) {
+    secondaryLocks.forEach(lock => parts.push(lock, ''));
+    parts.push(
+      `NOTE: This scene features ${matchedSecondary.length + (dna ? 1 : 0)} characters.`,
+      'Each character must be visually DISTINCT — do NOT mix or merge their appearances.',
+      ''
+    );
+  }
+
+  parts.push('=== SCENE DESCRIPTION ===');
+  if (typeStyle)   parts.push(typeStyle);
+  if (cameraCtx)   parts.push(cameraCtx);
+  if (dialogueCtx) parts.push(dialogueCtx);
+  parts.push(sceneDesc);
+  parts.push('=== END SCENE ===', '');
+
+  parts.push('=== STYLE ===');
+  parts.push(STYLE_BASE);
+  parts.push('=== END STYLE ===', '');
+
+  parts.push('=== FORBIDDEN ===');
+  parts.push(NO_TEXT_RULE);
+  parts.push(`Also avoid: ${combinedNeg}`);
+  parts.push('=== END FORBIDDEN ===');
+
+  return parts.join('\n');
+}
+
+// ── フォールバックプロンプト (最終リトライ用・シンプル化) ─────────────────────
+function buildFallbackPrompt(scene, dna) {
+  const typeStyle = SCENE_TYPE_STYLE[scene.type] ?? 'Medium shot,';
+  const base = dna
+    ? `${dna} ${typeStyle} A single character in a warm Japanese interior setting.`
+    : `${typeStyle} A cozy Japanese living room scene.`;
+  const dialogue = scene.japanese_dialogue?.trim();
+  const dialogueCtx = dialogue ? `Emotional moment: "${dialogue}". ` : '';
+  return [
+    `${dialogueCtx}${base}`,
+    STYLE_BASE,
+    NO_TEXT_RULE,
+    `Do NOT include: ${GLOBAL_NEGATIVE}`,
+  ].join('\n');
+}
+
+// ── 이미지 생성 (텍스트 프롬프트만 사용) ─────────────────────────────────────
+// gemini-2.5-flash-image: imageSize 미지원, aspectRatio만 가능
+async function generateImage(promptText) {
   const response = await ai.models.generateContent({
     model: IMAGE_MODEL,
-    contents: fullPrompt,
+    contents: [{ text: promptText }],
     config: {
       responseModalities: ['TEXT', 'IMAGE'],
-      imageConfig: { aspectRatio: '16:9' },
+      imageConfig: {
+        aspectRatio: ASPECT_RATIO,
+      },
     },
   });
 
@@ -59,32 +246,35 @@ async function generateImageGemini(prompt, negativePrompt) {
   return imgPart.inlineData.data; // base64
 }
 
-// ── [Textual DNA] テンキ爺 고정 외모 변수 ────────────────────────────────────
-// 이 텍스트는 DJ_SHOT 씬 프롬프트 맨 앞에 자동 주입됩니다.
-// 나중에 캐릭터 외모를 바꾸고 싶으면 이 부분만 수정하세요.
-const CHARACTER_DNA = 'A consistent character design: a battered retro tin robot DJ named Tenki-jii, square boxy head with cracked paint and rust spots, single glowing amber mono-eye, bent antennae with small flags, faded red chest panel with analog dials and gauges, worn silver mechanical arms with visible joints, seated behind a vintage Showa-era wooden radio desk stacked with vinyl records and vacuum tubes,';
-
-const STYLE_SUFFIX = ' Showa retro anime illustration, Studio Ghibli warm color palette, warm amber cinematic lighting, masterpiece, best quality, highly detailed, 8k.';
-
-const GLOBAL_NEGATIVE = 'photorealistic, 3D render, realistic, real photo, photograph, hyperrealistic, modern style, cyberpunk, neon colors, glossy texture, plastic texture, abstract, moles, beauty marks, glasses, spectacles, nsfw, blurry, watermark, western features, square format, portrait format';
-
-// ── [PATCH] 지수 백오프: 1분 → 2분 → 4분 ────────────────────────────────────
-async function generateWithBackoff(prompt, negativePrompt, sceneId) {
-  const BACKOFF_DELAYS = [60000, 120000, 240000];
+// ── 지수 백오프 재시도 ────────────────────────────────────────────────────────
+async function generateWithBackoff(promptText, sceneId, fallbackPrompt = null) {
+  const BACKOFF_DELAYS = [30000, 60000, 120000];
   let lastErr;
-  for (let attempt = 0; attempt <= BACKOFF_DELAYS.length; attempt++) {
+  const totalAttempts = BACKOFF_DELAYS.length + 1; // 최대 4회
+
+  for (let attempt = 0; attempt < totalAttempts; attempt++) {
+    // 마지막 시도에서 fallback 프롬프트로 교체
+    const usePrompt = (fallbackPrompt && attempt === totalAttempts - 1)
+      ? fallbackPrompt
+      : promptText;
+    if (fallbackPrompt && attempt === totalAttempts - 1) {
+      console.log(`   🔄 [${sceneId}] 마지막 시도: 단순화 프롬프트로 재시도...`);
+    }
+
     try {
-      return await generateImageGemini(prompt, negativePrompt);
+      return await generateImage(usePrompt);
     } catch (err) {
       lastErr = err;
-      const is429 = err.message.includes('429') || err.message.toLowerCase().includes('quota');
+      const is429 = err.message.includes('429')
+        || err.message.toLowerCase().includes('quota')
+        || err.message.toLowerCase().includes('resource_exhausted');
       if (attempt < BACKOFF_DELAYS.length) {
         const waitMs = BACKOFF_DELAYS[attempt];
         if (is429) {
-          console.warn(`\n   🚨 [${sceneId}] Quota 제한 도달: ${waitMs / 1000}초 대기 중... (시도 ${attempt + 1}/${BACKOFF_DELAYS.length})`);
+          console.warn(`\n   🚨 [${sceneId}] Quota 도달: ${waitMs / 1000}초 대기... (시도 ${attempt + 1}/${BACKOFF_DELAYS.length})`);
         } else {
-          console.warn(`   ⚠️ [${sceneId}] 시도 ${attempt + 1} 실패 (${err.message.slice(0, 200)})`);
-          console.log(`   ⏳ ${waitMs / 1000}초 대기 후 Imagen 4.0 재시도...`);
+          console.warn(`   ⚠️  [${sceneId}] 시도 ${attempt + 1} 실패: ${err.message.slice(0, 200)}`);
+          console.log(`   ⏳ ${waitMs / 1000}초 대기 후 재시도...`);
         }
         await new Promise(r => setTimeout(r, waitMs));
       }
@@ -93,7 +283,7 @@ async function generateWithBackoff(prompt, negativePrompt, sceneId) {
   throw lastErr;
 }
 
-// ── FIX 2+3: ffmpeg 리사이즈 + ffprobe 검증 ─────────────────────────────────
+// ── ffmpeg 리사이즈 + 검증 ────────────────────────────────────────────────────
 function resizeTo1920x1080(inputPath, outputPath) {
   const tmpPath = outputPath + '.tmp.png';
   execSync(
@@ -116,48 +306,45 @@ function verifySize(filePath) {
 function ensureSize(filePath) {
   const { width, height } = verifySize(filePath);
   if (width !== 1920 || height !== 1080) {
-    console.warn(`   ⚠️  크기 불일치: ${width}×${height} → 강제 리사이즈 적용`);
+    console.warn(`   ⚠️  크기 불일치: ${width}×${height} → 강제 리사이즈`);
     resizeTo1920x1080(filePath, filePath);
-    const after = verifySize(filePath);
-    console.log(`   ✅ 리사이즈 완료: ${after.width}×${after.height}`);
   }
 }
 
+// ── 메인 루프 ─────────────────────────────────────────────────────────────────
 const results = [];
 let success = 0, fail = 0;
 
-console.log(`🖼️ 총 ${scenes.length}개 씬 이미지 생성 시작 (Imagen 4.0 전용)`);
-console.log(`   예상 소요: 약 ${Math.ceil(scenes.length * 15 / 60)}분\n`);
+console.log(`🖼️  총 ${scenes.length}개 씬 이미지 생성 시작 (${IMAGE_MODEL})`);
+console.log(`   비율: ${ASPECT_RATIO} | 캐릭터 일관성: DNA 텍스트 잠금 방식\n`);
 
 for (let i = 0; i < scenes.length; i++) {
   const scene = scenes[i];
   const filePath = P.images + '/' + scene.scene_id + '.png';
 
-  // ✅ 멱등성: 이미 생성된 파일 스킵
+  // 멱등성: 이미 생성된 파일 스킵
   if (fs.existsSync(filePath)) {
     process.stdout.write(`⏭️  [${i+1}/${scenes.length}] ${scene.scene_id} 스킵\n`);
     results.push({ scene_id: scene.scene_id, status: 'skipped', file: filePath });
     continue;
   }
 
-  // ── [Textual DNA] 캐릭터 DNA 강제 주입 ─────────────────────────────────
-  // DJ_SHOT → CHARACTER_DNA(상수) / 사연 씬 → 03_character_prompts의 character_seed
-  const isDJScene = scene.type === 'DJ_SHOT' || scene.speaker === 'TENKI_JII';
-  const episodeSeed = scene.episode_id != null ? episodeDNAMap.get(scene.episode_id) : null;
-  let dna = null;
-  if (isDJScene) {
-    dna = CHARACTER_DNA;
-  } else if (episodeSeed) {
-    dna = episodeSeed;
-  }
-  const basePrompt = dna ? dna + ' ' + scene.visual_prompt_en : scene.visual_prompt_en;
-  const prompt = basePrompt + STYLE_SUFFIX;
-  const negPrompt = scene.negative_prompt || GLOBAL_NEGATIVE;
-  const dnaTag = isDJScene ? '[DJ]' : (episodeSeed ? `[EP${scene.episode_id}]` : '[-]');
-  process.stdout.write(`🖼️  [${i+1}/${scenes.length}] ${scene.scene_id} (${scene.type}) ${dnaTag}... `);
+  // ── DNA 결정 ────────────────────────────────────────────────────────────────
+  const isDJ = scene.type === 'DJ_SHOT' || scene.speaker === 'TENKI_JII';
+  const dna = isDJ
+    ? DJ_DNA
+    : (scene.episode_id != null ? episodeDNAMap.get(scene.episode_id) ?? null : null);
+
+  const matchedSec = detectSecondaryChars(scene, scene.episode_id);
+  const secTag = matchedSec.length > 0 ? `+${matchedSec.map(s => s.character_key).join(',')}` : '';
+  const refTag = isDJ ? '[DJ]' : (dna ? `[EP${scene.episode_id}${secTag}]` : '[-]');
+  process.stdout.write(`🖼️  [${i+1}/${scenes.length}] ${scene.scene_id} (${scene.type}) ${refTag}... `);
+
+  const promptText = buildPrompt(scene, dna, scene.episode_id);
+  const fallback   = buildFallbackPrompt(scene, dna);
 
   try {
-    const b64 = await generateWithBackoff(prompt, negPrompt, scene.scene_id);
+    const b64 = await generateWithBackoff(promptText, scene.scene_id, fallback);
     fs.writeFileSync(filePath, Buffer.from(b64, 'base64'));
     resizeTo1920x1080(filePath, filePath);
     ensureSize(filePath);
@@ -171,7 +358,7 @@ for (let i = 0; i < scenes.length; i++) {
     fail++;
   }
 
-  // ── [PATCH] 씬 간 대기: 7s → 15s (분당 최대 4회 제한) ──────────────────────
+  // 씬 간 대기: 유료 플랜 기준 15초 (분당 ~4회)
   if (i < scenes.length - 1) await new Promise(r => setTimeout(r, 15000));
 }
 
@@ -182,4 +369,4 @@ fs.writeFileSync(
 );
 console.log(`\n=== 이미지 생성 완료 ===`);
 console.log(`✅ 성공: ${success}개 | ❌ 실패: ${fail}개`);
-console.log(`📁 .radio_output/images/`);
+console.log(`📁 images/`);

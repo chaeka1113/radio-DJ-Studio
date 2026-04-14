@@ -93,7 +93,7 @@ export function makePaths(epId) {
     refTts:          path.join(skills, 'ref_tts_v3_rules.md'),
 
     // ── 불변 CapCut 자산 ───────────────────────────────────────────────────
-    capcutTemplate:  path.join(ROOT, 'draft_content.json'),
+    capcutTemplate:  path.join(ROOT, 'draft_content_마스터_.json'),
     capcutMaterials: path.join(ROOT, '.radio_output', 'ref_capcut_materials.json'),
     masterTemplate:  path.join(ROOT, '.radio_output', 'master_template'),
   };

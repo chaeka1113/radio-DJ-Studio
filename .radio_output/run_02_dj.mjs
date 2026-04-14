@@ -15,7 +15,12 @@ const API_KEY = requireEnv('ANTHROPIC_API_KEY');
 const client = new Anthropic({ apiKey: API_KEY });
 
 const scripts = JSON.parse(fs.readFileSync(P.scripts, 'utf-8'));
-const [ep1, ep2, ep3] = scripts.episodes;
+const scriptEpisodes = scripts.episodes ?? [];
+if (scriptEpisodes.length < 3) {
+  console.error(`❌ 01_scripts.json에 에피소드 ${scriptEpisodes.length}개뿐 — 최소 3개 필요`);
+  process.exit(1);
+}
+const [ep1, ep2, ep3] = scriptEpisodes;
 
 // ── 규칙 주입 ──────────────────────────────────────────────────────────────────
 const referenceKnowledge = fs.readFileSync(P.refPersona, 'utf-8');
@@ -178,7 +183,7 @@ const merged = {
   show_opening: djMents.show_opening,
   show_closing: djMents.show_closing,
   tokyo_weather: realTimeWeather,
-  episodes: scripts.episodes.map(ep => {
+  episodes: scriptEpisodes.map(ep => {
     const djEp = djMents.episodes.find(d => d.id === ep.id);
     return {
       ...ep,
