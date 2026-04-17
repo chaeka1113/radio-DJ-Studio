@@ -42,6 +42,8 @@ if (qaFeedback) console.log('🔄 [재작업] QA 피드백 감지 — 수정 지
 // ── 규칙 주입 ──────────────────────────────────────────────────────────────────
 const referenceKnowledge = fs.readFileSync(P.refScript, 'utf-8');
 const scriptRubric = fs.readFileSync(P.refScriptRubric, 'utf-8');
+const japanFacts = fs.existsSync(P.refJapanFacts) ? fs.readFileSync(P.refJapanFacts, 'utf-8') : null;
+if (japanFacts) console.log('📊 [Japan Facts] 실제 가격·수치 데이터 주입 완료');
 
 // ── 영구 오답 노트 로드 (존재할 때만) ────────────────────────────────────────
 const pastLearnings = fs.existsSync(P.learnings) ? fs.readFileSync(P.learnings, 'utf-8') : null;
@@ -170,7 +172,13 @@ ${referenceKnowledge}
 
 ${scriptRubric}
 
-${pastLearnings ? `---
+${japanFacts ? `---
+
+# 📊 日本 実データ — 수치 작성 시 이 범위 내로만 사용 (ref_japan_facts.md)
+아래 수치를 벗어나면 QA 수치 정확성 항목에서 즉시 감점된다. 추측 금지.
+
+${japanFacts}
+` : ''}${pastLearnings ? `---
 
 【과거 실수 모음 — 절대 반복 금지】
 아래는 이전 방송 회차에서 실제로 발생한 실수들을 압축 정리한 오답 노트다.
@@ -197,6 +205,23 @@ for (let epIdx = 0; epIdx < 3; epIdx++) {
       : '';
   const tone  = cEp.required_emotion_tone ? `감정 톤 「${cEp.required_emotion_tone}」` : '';
   const contractParts = [kws ? `키워드 최소 1개: [${kws}]` : '', vHint, tone].filter(Boolean).join(' / ');
+
+  // 스토리 뼈대 (narrative_arc) — Planner가 미리 설계한 起承転結
+  const arc = cEp.narrative_arc;
+  const arcBlock = arc ? `
+【📖 스토리 뼈대 — 이 구조를 따라 800~1000字로 살을 붙여라】
+起(setup):   ${arc.setup || ''}
+承(incident): ${arc.incident || ''}
+転(turn):    ${arc.turn || ''}
+結(resolution): ${arc.resolution || ''}
+` : '';
+
+  // テンキ爺 반응 후크 힌트
+  const hooks = cEp.tenki_jii_hooks;
+  const hooksBlock = hooks && hooks.length > 0 ? `
+【🎙️ テンキ爺 반응 후크 — 아래 장면에서 DJ가 끼어들 계기를 심어둘 것】
+${hooks.map((h, i) => `후크${i + 1}: ${h}`).join('\n')}
+` : '';
 
   // 이 에피소드의 MZ 지시 (에피소드별 개별 적용)
   const isMzEp = includeMz && mzEpNum === epNum;
@@ -231,7 +256,7 @@ ${epAgeInstruction}
 ${contractParts ? `
 【📋 計画書 制約 — QA 通過のため必ず守ること】
 EP${epNum}: ${contractParts}
-` : ''}${epFeedbackBlock}
+` : ''}${arcBlock}${hooksBlock}${epFeedbackBlock}
 【出力 JSON のみ返答】
 {
   "id": ${epNum},

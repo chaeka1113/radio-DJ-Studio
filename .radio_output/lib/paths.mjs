@@ -87,10 +87,12 @@ export function makePaths(epId) {
     learnings:       path.join(skills, 'ref_learnings.md'),
     refScript:       path.join(skills, 'ref_script_rules.md'),
     refScriptRubric: path.join(skills, 'ref_script_rubric.md'),
+    refJapanFacts:   path.join(skills, 'ref_japan_facts.md'),
     refPersona:      path.join(skills, 'ref_persona_rules.md'),
     refVisual:       path.join(skills, 'ref_visual_rules.md'),
     refVisualRubric: path.join(skills, 'ref_visual_rubric.md'),
-    refTts:          path.join(skills, 'ref_tts_v3_rules.md'),
+    refTts:          path.join(skills, 'ref_tts_v3_rules.md'),     // 전체 ElevenLabs 스펙 (944줄, 레퍼런스용)
+    refTtsCore:      path.join(skills, 'ref_tts_v3_core.md'),      // 프로젝트 핵심 규칙만 (주입용)
 
     // ── 불변 CapCut 자산 ───────────────────────────────────────────────────
     capcutTemplate:  path.join(ROOT, 'draft_content_마스터_.json'),

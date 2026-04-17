@@ -24,7 +24,6 @@ const [ep1, ep2, ep3] = scriptEpisodes;
 
 // ── 규칙 주입 ──────────────────────────────────────────────────────────────────
 const referenceKnowledge = fs.readFileSync(P.refPersona, 'utf-8');
-const scriptRubric = fs.readFileSync(P.refScriptRubric, 'utf-8');
 
 // ── 실시간 도쿄 날씨 ───────────────────────────────────────────────────────────
 async function fetchTokyoWeather() {
@@ -81,14 +80,11 @@ ${referenceKnowledge}
 
 ---
 
-# 🚨 QA 채점 사전 경고 — 반드시 숙지할 것
+# 🚨 DJ 멘트 필수 규칙
 
-당신이 작성한 DJ 멘트는 생성 직후 아래 가중치 평가표에 따라 항목별로 깐깐하게 채점된다.
-커트라인 85점 미만이면 Fail 처리되고 재작업이 강제된다.
-특히 40점짜리 감점 항목(일본어 행동 지문·괄호 사용, V3 태그 규칙 위반)을 원천 차단하여 생성하라.
+DJ 멘트에서 [溜息][間] 등 일본어 행동 지문과 괄호 사용은 절대 금지.
 「ワシ」1인칭·「電波泥棒」호칭·고물 로봇 비유를 반드시 포함할 것.
-
-${scriptRubric}
+ElevenLabs V3 Audio Tag([sighs] 등)는 앞뒤 공백 필수 — 일본어에 직접 붙이지 말 것.
 
 ---
 

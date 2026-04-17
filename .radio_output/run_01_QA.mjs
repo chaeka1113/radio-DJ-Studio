@@ -127,6 +127,11 @@ ensureDirs(P);
     ? fs.readFileSync(rubricPath, 'utf-8')
     : '';
 
+  // 일본 실데이터 로드 (수치 사실성 검증용)
+  const japanFactsText = fs.existsSync(P.refJapanFacts)
+    ? fs.readFileSync(P.refJapanFacts, 'utf-8')
+    : '';
+
   // stage2Results: id별 pass/score/deductions 초기화
   let stage2Results = stage1Results.map(r => ({
     id: r.id,
@@ -149,7 +154,13 @@ ensureDirs(P);
 
 ## 평가표 (Rubric)
 ${rubricText}
+${japanFactsText ? `
+## 수치 검증 기준 데이터 (ref_japan_facts.md)
+항목 3의 수치 정확성 채점 시 아래 실데이터와 대조하라.
+대본에 등장하는 가격·연금액·시급 등이 아래 범위를 크게 벗어나면 감점.
 
+${japanFactsText}
+` : ''}
 ## 에피소드 정보
 - EP ID: ${r.id}
 - required_keywords: ${JSON.stringify(cEp.required_keywords || [])}
@@ -160,20 +171,29 @@ ${rubricText}
 ${r.script || '(없음)'}
 
 ## 채점 지시
-1. **항목 1 (계약 이행, 40점)**: required_keywords 포함 여부, 연령 설정(Stage 1에서 이미 체크됨 — 통과 시 이 세부항목은 Pass), villain_required 일치 여부를 대본 내용으로 검증. 각 세부항목 위반 시 구체적으로 감점.
-2. **항목 2 (V3 오디오 태그, 40점)**: 일본어 대괄호 지문([溜息][間] 등), 일본어 괄호 행동묘사（　）, SSML(<break/>), 노이즈 의성어(ジジジ 등) 중 하나라도 발견 시 즉시 -40점. 없으면 만점.
-3. **항목 3 (페르소나 및 분량, 20점)**: 대본(01_scripts)의 경우 분량(800~1000자)만 체크. 분량 미달이면 -5점, 나머지 15점은 자동 만점.
+1. **항목 1 (계약 이행, 25점)**: required_keywords 포함 여부(15점), 연령 설정(5점), villain_required 일치(5점).
+   - 키워드: 대본 서사에 자연스럽게 녹아 있는지 확인. 단순 삽입도 인정하되, 전혀 없으면 -15점.
+2. **항목 2 (V3 오디오 태그, 35점)**: 일본어 대괄호 지문([溜息][間] 등), 일본어 괄호 행동묘사（　）, SSML(<break/>), 노이즈 의성어(ジジジ 등) 중 하나라도 발견 시 즉시 -35점.
+   - ⚠️ 추가: script 필드(사연자 편지)에 영문 Audio Tag([sighs] 등)도 금지 → 발견 시 -35점.
+   - 영문 Audio Tag는 DJ 멘트 필드에서만 허용.
+3. **항목 3 (서사 사실성 및 수치 정확성, 25점)**:
+   - 구체적 지명/장소(도도부현·시구정촌·店名) 1개 이상: 5점 (없으면 -5점)
+   - 수치의 현실성(위 ref_japan_facts.md 기준): 10점 (범위 크게 벗어나면 -5〜10점)
+   - 실제 대화 인용(「」포함 직접 인용) 1회 이상: 5점 (없으면 -5점)
+   - テンキ爺 반응 후크(독설/공감/설 치는 계기) 1개 이상: 5점 (없으면 -5점)
+4. **항목 4 (분량, 15점)**: script 필드 800〜1000자. 미달 -10점, 초과 -5점.
 
-총점 = 항목1 + 항목2 + 항목3 (100점 만점)
+총점 = 항목1(25) + 항목2(35) + 항목3(25) + 항목4(15) = 100점 만점
 커트라인: 85점 미만 = Fail
 
 ## 출력 형식 (JSON만 반환, 다른 텍스트 불가)
 {
   "episode_id": ${r.id},
   "scores": {
-    "contract_compliance": <0-40>,
-    "v3_audio_tags": <0-40>,
-    "persona_and_length": <0-20>
+    "contract_compliance": <0-25>,
+    "v3_audio_tags": <0-35>,
+    "narrative_realism": <0-25>,
+    "length": <0-15>
   },
   "total": <0-100>,
   "verdict": "Pass" | "Fail",

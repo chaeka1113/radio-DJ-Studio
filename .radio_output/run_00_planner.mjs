@@ -64,10 +64,18 @@ Q&A 모드: ${includeQna ? 'ON' : 'OFF'}
 3. required_emotion_tone: 該 테마에 어울리는 감정 톤 (苦笑い|哀愁|懐かしさ|ほっこり|驚き 중 1개)
 4. forbidden_drift: 이 테마에서 절대 빠지면 안 되는 주제 이탈 패턴 예시 1~2개
 5. villain_required: 빌런 캐릭터가 반드시 필요한지 여부 (boolean)
+6. narrative_arc: 사연의 起承転結 4단계 스케치 (각 50字 이내 일본어)
+   - setup: 주인공과 배경 상황
+   - incident: 이야기의 발단·사건
+   - turn: 감정의 전환점 또는 갈등 고조
+   - resolution: 결말 또는 투고 동기
+7. tenki_jii_hooks: テンキ爺가 끼어들 장면 힌트 2개 (독설/공감/설 치는 타이밍)
+   - 각 항목은 「장면 설명 → テンキ爺 반응 유형」형식
+   - 예: "息子に「自業自得」と言われる → 独説타이밍"
 
 【출력 JSON만 반환, 설명 없음】
 {
-  "contract_version": "1.0",
+  "contract_version": "1.1",
   "generated_at": "${new Date().toISOString()}",
   "topics": ${JSON.stringify(topics.slice(0, 3))},
   "mz_mode": ${includeMz},
@@ -81,12 +89,22 @@ Q&A 모드: ${includeQna ? 'ON' : 'OFF'}
       "character_profile": {
         "age_range": "50代以上",
         "gender_hint": "any",
-        "personality_hint": "캐릭터 성격 한 줄 힌트"
+        "personality_hint": "캐릭터 성격 한 줄 힌트 (일본어)"
       },
       "required_emotion_tone": "苦笑い",
       "forbidden_drift": ["이탈 패턴 예시1"],
       "villain_required": false,
-      "script_length_range": "800〜1000文字"
+      "script_length_range": "800〜1000文字",
+      "narrative_arc": {
+        "setup": "주인공과 상황 설정 (50字 이내 일본어)",
+        "incident": "발단이 되는 사건 (50字 이내 일본어)",
+        "turn": "감정 전환점 또는 갈등 (50字 이내 일본어)",
+        "resolution": "결말 또는 투고 동기 (50字 이내 일본어)"
+      },
+      "tenki_jii_hooks": [
+        "장면 → テンキ爺 반응 유형 (예: 독설/공감/침묵후 설치기)",
+        "장면 → テンキ爺 반응 유형"
+      ]
     },
     { "id": 2 },
     { "id": 3 }

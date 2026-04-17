@@ -20,8 +20,10 @@ const historyPath      = path.join(__dirname_audio, 'ref_broadcast_history.json'
 const epArgIdx = process.argv.indexOf('--ep');
 const EP_NUM   = epArgIdx !== -1 ? parseInt(process.argv[epArgIdx + 1]) : null;
 
-// ── 규칙 주입 (V3 가이드라인 우선 로드) ─────────────────────────────────────────
-const referenceKnowledge = fs.readFileSync(P.refTts, 'utf-8');
+// ── 규칙 주입 (핵심 규칙만 주입 — 944줄 전체 스펙 대신 ref_tts_v3_core.md 사용) ────
+const referenceKnowledge = fs.existsSync(P.refTtsCore)
+  ? fs.readFileSync(P.refTtsCore, 'utf-8')
+  : fs.readFileSync(P.refTts, 'utf-8'); // fallback: 전체 스펙
 
 // ── FFmpeg 가용성 체크 & 전역 묵음 파일 생성 ──────────────────────────────────
 const SILENCE_SEC = 1.5; // 세그먼트 간 묵음 (초)
