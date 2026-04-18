@@ -206,14 +206,26 @@ ${r.script || '(없음)'}
 }`;
 
       try {
-        const msg = await client.messages.create({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 1024,
-          messages: [{ role: 'user', content: rubricPrompt }],
-        });
-        const raw = msg.content[0].text.match(/\{[\s\S]*\}/)?.[0];
-        if (raw) {
-          const scored = JSON.parse(raw);
+        let scored = null;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          const msg = await client.messages.create({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 2048,
+            messages: [{ role: 'user', content: rubricPrompt }],
+          });
+          const raw = msg.content[0].text.match(/\{[\s\S]*\}/)?.[0];
+          if (!raw) {
+            console.warn(`   EP${r.id} 루브릭 채점 시도 ${attempt}/3: JSON 블록 없음`);
+            continue;
+          }
+          try {
+            scored = JSON.parse(raw);
+            break;
+          } catch (parseErr) {
+            console.warn(`   EP${r.id} 루브릭 채점 시도 ${attempt}/3: JSON 파싱 실패 (${parseErr.message})`);
+          }
+        }
+        if (scored) {
           const total = scored.total ?? 100;
           const verdict = scored.verdict ?? (total >= 85 ? 'Pass' : 'Fail');
           stage2Results[r.id - 1].score = total;
@@ -226,9 +238,17 @@ ${r.script || '(없음)'}
           } else {
             console.log(`   ✅ EP${r.id} 루브릭 채점 Pass (${total}/100)`);
           }
+        } else {
+          stage2Results[r.id - 1].pass = false;
+          stage2Results[r.id - 1].score = 0;
+          stage2Results[r.id - 1].deductions = ['루브릭 채점 3회 모두 실패 → 안전을 위해 Fail 처리'];
+          console.warn(`   ❌ EP${r.id} 루브릭 채점 3회 실패 → Fail 처리`);
         }
       } catch (err) {
-        console.warn(`   EP${r.id} 루브릭 채점 실패 → Pass 처리 (${err.message})`);
+        stage2Results[r.id - 1].pass = false;
+        stage2Results[r.id - 1].score = 0;
+        stage2Results[r.id - 1].deductions = [`루브릭 API 오류: ${err.message}`];
+        console.warn(`   ❌ EP${r.id} 루브릭 채점 API 오류 → Fail 처리 (${err.message})`);
       }
     }
   }
