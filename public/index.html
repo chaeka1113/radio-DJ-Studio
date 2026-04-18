@@ -1,180 +1,724 @@
 <!DOCTYPE html>
-<html lang="ja" class="dark">
+<html lang="ja">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>📻 テンキ爺 Radio DJ Studio</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<script>tailwind.config = { darkMode: 'class' }</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Patrick+Hand&family=JetBrains+Mono:wght@400;600&display=swap">
 <style>
-  ::-webkit-scrollbar { width: 6px; height: 6px; }
-  ::-webkit-scrollbar-track { background: #1f2937; }
-  ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 3px; }
-  .log-line-error { color: #f87171; }
-  .log-line-log { color: #d1fae5; }
-  .fade-in { animation: fadeIn .3s ease; }
-  @keyframes fadeIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
-  textarea { resize: vertical; }
+/* ─── Design tokens (wireframe palette) ─── */
+:root {
+  --ink:       #1a1a1a;
+  --ink-2:     #2d2d2d;
+  --ink-soft:  #555;
+  --ink-faint: #999;
+  --paper:     #f5f1e8;
+  --paper-2:   #ede8d8;
+  --paper-3:   #e4dfc8;
+  --line:      #2d2d2d;
+  --accent:    #d94a1a;
+  --accent-soft: #f4a890;
+  --ok:    #2d7a3e;
+  --warn:  #c98a1a;
+  --bad:   #b03020;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  font-family: 'Patrick Hand', system-ui, sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.35;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ─── Hand-drawn box ─── */
+.sk-box {
+  border: 2px solid var(--line);
+  border-radius: 6px 8px 5px 9px / 8px 6px 9px 5px;
+  background: var(--paper);
+  position: relative;
+}
+.sk-box.thin   { border-width: 1.5px; }
+.sk-box.dashed { border-style: dashed; }
+.sk-box.fill   { background: var(--paper-2); }
+.sk-box.dark   { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.sk-box.accent { border-color: var(--accent); background: var(--accent-soft); }
+
+/* ─── Typography helpers ─── */
+.sk-h    { font-family: 'Caveat', cursive; font-weight: 700; }
+.sk-mono { font-family: 'JetBrains Mono', monospace; font-size: 0.78em; }
+.sk-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.62em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+/* ─── Buttons ─── */
+.sk-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 11px;
+  border: 1.5px solid var(--line);
+  border-radius: 4px 6px 5px 7px / 6px 4px 7px 5px;
+  background: var(--paper);
+  font-family: 'Patrick Hand', sans-serif;
+  font-size: 0.88em;
+  cursor: pointer;
+  box-shadow: 2px 2px 0 var(--line);
+  transition: transform .1s, box-shadow .1s;
+  white-space: nowrap;
+}
+.sk-btn:hover { transform: translate(-1px,-1px); box-shadow: 3px 3px 0 var(--line); }
+.sk-btn:active { transform: translate(1px,1px); box-shadow: 1px 1px 0 var(--line); }
+.sk-btn.primary { background: var(--ink); color: var(--paper); }
+.sk-btn.accent  { background: var(--accent); color: #fff; border-color: var(--accent); }
+.sk-btn.ok      { background: var(--ok); color: #fff; border-color: var(--ok); }
+.sk-btn.ghost   { box-shadow: none; border-style: dashed; }
+.sk-btn.tiny    { padding: 2px 7px; font-size: 0.78em; box-shadow: 1px 1px 0 var(--line); }
+.sk-btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+
+/* ─── Tags ─── */
+.sk-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border: 1.2px solid var(--line);
+  border-radius: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.62em;
+  background: var(--paper);
+  white-space: nowrap;
+}
+.sk-tag.accent { background: var(--accent); color: #fff; border-color: var(--accent); }
+.sk-tag.ok     { background: var(--ok);     color: #fff; border-color: var(--ok); }
+.sk-tag.warn   { background: var(--warn);   color: #fff; border-color: var(--warn); }
+
+/* ─── Status dots ─── */
+.sk-dot {
+  display: inline-block;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line);
+  background: var(--paper);
+  flex-shrink: 0;
+}
+.sk-dot.ok   { background: var(--ok);   border-color: var(--ok); }
+.sk-dot.run  { background: var(--accent); border-color: var(--accent); animation: blink 1s infinite; }
+.sk-dot.warn { background: var(--warn); border-color: var(--warn); }
+.sk-dot.bad  { background: var(--bad);  border-color: var(--bad); }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+/* ─── Header ─── */
+#header {
+  flex-shrink: 0;
+  border-bottom: 2px solid var(--line);
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--paper);
+}
+#header .logo-box {
+  width: 40px; height: 40px;
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 5px 7px 5px 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px;
+  flex-shrink: 0;
+}
+#header h1 { font-family: 'Caveat', cursive; font-size: 1.5em; font-weight: 700; }
+#header .ep-label { font-family: 'JetBrains Mono', monospace; font-size: 0.65em; color: var(--ink-soft); }
+
+/* pipeline dots in header */
+#header .pipe-dots {
+  display: flex; gap: 10px; align-items: center;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+#header .pipe-dots .pd {
+  display: flex; align-items: center; gap: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65em;
+  color: var(--ink-soft);
+}
+
+/* ─── Pipeline Rail ─── */
+#pipeline-rail {
+  flex-shrink: 0;
+  border-bottom: 1.5px dashed var(--ink-soft);
+  padding: 8px 20px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--paper-2);
+  overflow-x: auto;
+}
+.pipe-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 8px;
+  border: 1.5px solid var(--line);
+  border-radius: 4px 6px 5px 7px;
+  background: var(--paper);
+  min-width: 56px;
+  cursor: default;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.62em;
+  color: var(--ink-soft);
+  text-align: center;
+  flex-shrink: 0;
+  transition: background .2s;
+}
+.pipe-step .icon { font-size: 14px; }
+.pipe-step .step-id { font-size: 0.85em; color: var(--ink-faint); }
+.pipe-step.s-ok   { background: var(--paper-2); border-color: var(--ok); color: var(--ok); }
+.pipe-step.s-run  { background: var(--accent); border-color: var(--accent); color: #fff; }
+.pipe-step.s-warn { border-color: var(--warn); color: var(--warn); }
+.pipe-step.s-bad  { border-color: var(--bad); color: var(--bad); }
+.pipe-arrow { color: var(--ink-faint); font-size: 1.1em; flex-shrink: 0; }
+
+/* ─── Topic Bar ─── */
+#topic-bar {
+  flex-shrink: 0;
+  border-bottom: 1.5px solid var(--line);
+  padding: 8px 20px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  background: var(--paper);
+}
+#topic-bar .topic-input-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+#topic-bar .topic-input-wrap label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.6em;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+#topic-bar input[type=text] {
+  border: 1.5px solid var(--line);
+  border-radius: 4px 6px 5px 7px;
+  background: var(--paper);
+  font-family: 'Patrick Hand', sans-serif;
+  font-size: 0.9em;
+  padding: 4px 8px;
+  width: 100%;
+  color: var(--ink);
+  outline: none;
+}
+#topic-bar input[type=text]:focus { border-color: var(--accent); box-shadow: 2px 2px 0 var(--accent-soft); }
+#topic-bar .topic-ko {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.6em;
+  color: var(--accent);
+  min-height: 14px;
+}
+.toggle-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.toggle-row label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.82em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.toggle-row input[type=checkbox] { accent-color: var(--accent); }
+
+/* ─── Step buttons bar ─── */
+#step-bar {
+  flex-shrink: 0;
+  border-bottom: 1.5px dashed var(--ink-soft);
+  padding: 6px 20px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  background: var(--paper-2);
+}
+#step-bar .bar-label { font-family: 'JetBrains Mono', monospace; font-size: 0.62em; color: var(--ink-soft); margin-right: 2px; }
+
+/* ─── Main 3-column ─── */
+#main {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Left: Editor */
+#col-left {
+  width: 32%;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 2px solid var(--line);
+  overflow: hidden;
+}
+#editor-tabs {
+  display: flex;
+  border-bottom: 1.5px solid var(--line);
+  background: var(--paper-2);
+  flex-shrink: 0;
+}
+.ed-tab {
+  padding: 6px 14px;
+  font-family: 'Patrick Hand', sans-serif;
+  font-size: 0.85em;
+  cursor: pointer;
+  border: none;
+  background: none;
+  border-bottom: 2.5px solid transparent;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+.ed-tab.active { border-bottom-color: var(--accent); color: var(--accent); font-weight: 600; }
+#editor-save-btn { margin: 4px 8px 4px auto; }
+
+#editor-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 10px;
+  gap: 8px;
+}
+#editor {
+  flex: 1;
+  background: var(--paper-2);
+  border: 1.5px solid var(--line);
+  border-radius: 4px 6px 5px 7px;
+  padding: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72em;
+  color: var(--ink);
+  line-height: 1.6;
+  resize: none;
+  outline: none;
+  overflow-y: auto;
+}
+#editor:focus { border-color: var(--accent); }
+
+#translate-btn { width: 100%; }
+#translate-panel { display: none; }
+#translate-panel .tl-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 4px;
+  font-family: 'JetBrains Mono', monospace; font-size: 0.7em; color: var(--ink-soft);
+}
+#translate-result {
+  background: var(--paper-2);
+  border: 1.5px dashed var(--ink-soft);
+  border-radius: 4px;
+  padding: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68em;
+  line-height: 1.6;
+  max-height: 140px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  color: var(--ink);
+}
+
+/* QA score strip */
+#qa-strip {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border-top: 1.5px dashed var(--ink-soft);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68em;
+  color: var(--ink-soft);
+  background: var(--paper);
+}
+
+/* Middle: Gallery */
+#col-mid {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 2px solid var(--line);
+}
+#gallery-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1.5px solid var(--line);
+  background: var(--paper-2);
+}
+#gallery-header .gh-title { font-family: 'Caveat', cursive; font-weight: 700; font-size: 1.1em; }
+#gallery-count { font-family: 'JetBrains Mono', monospace; font-size: 0.65em; color: var(--ink-soft); }
+
+#gallery {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+}
+#gallery::-webkit-scrollbar { width: 5px; }
+#gallery::-webkit-scrollbar-thumb { background: var(--paper-3); border-radius: 3px; }
+
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.scene-card {
+  border: 1.5px solid var(--line);
+  border-radius: 5px 7px 5px 8px;
+  overflow: hidden;
+  background: var(--paper);
+  display: flex;
+  flex-direction: column;
+  transition: border-color .15s;
+}
+.scene-card:hover { border-color: var(--accent); }
+.scene-card .card-img {
+  position: relative;
+  aspect-ratio: 16/9;
+  background: var(--paper-2);
+  overflow: hidden;
+}
+.scene-card .card-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.scene-card .card-img .img-placeholder {
+  display: flex; align-items: center; justify-content: center;
+  height: 100%;
+  font-family: 'JetBrains Mono', monospace; font-size: 0.7em;
+  color: var(--ink-faint);
+  border: none;
+}
+.scene-card .card-img .img-placeholder.running { color: var(--accent); }
+.scene-card .card-img .scene-id-badge {
+  position: absolute; top: 3px; left: 3px;
+  font-family: 'JetBrains Mono', monospace; font-size: 0.6em; font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(0,0,0,0.7); color: #fff;
+}
+.scene-card .card-img .scene-id-badge.dj { background: var(--accent); }
+.scene-card .card-body { padding: 5px 7px; }
+.scene-card .card-type {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.58em;
+  font-weight: 600; color: var(--ink-soft);
+}
+.scene-card .card-text {
+  font-size: 0.75em; line-height: 1.3;
+  overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  min-height: 28px;
+  margin: 2px 0 4px;
+}
+.scene-card .card-actions { display: flex; gap: 4px; }
+
+/* empty gallery */
+.gallery-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  height: 100%;
+  font-family: 'Caveat', cursive; color: var(--ink-faint); gap: 8px;
+}
+.gallery-empty .empty-icon { font-size: 3em; }
+
+/* Right: Log + output */
+#col-right {
+  width: 26%;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#log-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--ink);
+  color: var(--paper);
+}
+#log-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+#log-header .lh-title {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.65em;
+  color: var(--accent-soft);
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
+#log-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65em;
+  line-height: 1.65;
+}
+#log-content::-webkit-scrollbar { width: 4px; }
+#log-content::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+.log-line-error { color: var(--accent-soft); }
+.log-line-log   { color: #c9c9c9; }
+.log-line-ok    { color: #a0d0a0; }
+
+#output-panel {
+  flex-shrink: 0;
+  border-top: 2px solid var(--line);
+  padding: 8px 10px;
+  background: var(--paper);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+#output-panel .op-label { font-family: 'JetBrains Mono', monospace; font-size: 0.6em; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.07em; }
+#output-btns { display: flex; gap: 5px; flex-wrap: wrap; }
+
+/* EP Resume bar */
+#ep-bar {
+  flex-shrink: 0;
+  border-top: 1.5px dashed var(--ink-soft);
+  padding: 6px 10px;
+  background: var(--paper-2);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65em;
+  color: var(--ink-soft);
+}
+#ep-bar input {
+  flex: 1;
+  border: 1.5px solid var(--line);
+  border-radius: 3px;
+  background: var(--paper);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1em;
+  padding: 2px 6px;
+  color: var(--ink);
+  outline: none;
+}
+
+/* ─── Toast ─── */
+#toast {
+  position: fixed; bottom: 20px; right: 20px;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: 'Patrick Hand', sans-serif;
+  font-size: 0.9em;
+  padding: 8px 16px;
+  border-radius: 4px 6px 5px 7px;
+  box-shadow: 3px 3px 0 var(--accent);
+  z-index: 999;
+  opacity: 0;
+  transition: opacity .3s;
+  pointer-events: none;
+}
+
+/* ─── Scrollbar global ─── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: var(--paper-2); }
+::-webkit-scrollbar-thumb { background: var(--paper-3); border-radius: 3px; }
+
+/* ─── Fade-in ─── */
+.fade-in { animation: fadeIn .25s ease; }
+@keyframes fadeIn { from { opacity:0; transform:translateY(3px); } to { opacity:1; transform:none; } }
 </style>
 </head>
-<body class="bg-gray-900 text-gray-100 font-sans flex flex-col h-screen overflow-hidden">
+<body>
 
 <!-- ===== HEADER ===== -->
-<header class="bg-gray-800 border-b border-gray-700 px-5 py-3 flex items-center gap-4 shrink-0">
-  <span class="text-2xl">📻</span>
+<header id="header">
+  <div class="logo-box">📻</div>
   <div>
-    <h1 class="text-base font-bold text-amber-400 leading-tight">テンキ爺 Radio DJ Studio</h1>
-    <p class="text-xs text-gray-500">ガラクタロボ Web Dashboard</p>
+    <h1 class="sk-h">テンキ爺 Radio DJ Studio</h1>
+    <div class="ep-label" id="ep-info">ガラクタロボ v3.2 · EP 대기 중</div>
   </div>
-  <div class="flex-1"></div>
-  <!-- Pipeline Status Dots -->
-  <div class="flex items-center gap-3 text-xs">
-    <span id="dot-01" class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-gray-600"></span>대본</span>
-    <span id="dot-02" class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-gray-600"></span>DJ멘트</span>
-    <span id="dot-04" class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-gray-600"></span>스토리보드</span>
-    <span id="dot-05" class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-gray-600"></span>이미지</span>
-    <span id="dot-07" class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-gray-600"></span>TTS</span>
-    <span id="dot-08" class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-gray-600"></span>켄번스</span>
-    <span id="dot-09" class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-gray-600"></span>영상편집</span>
+
+  <!-- Pipeline status dots -->
+  <div class="pipe-dots" id="pipe-dots">
+    <div class="pd"><span class="sk-dot" id="dot-01"></span>대본</div>
+    <div class="pd"><span class="sk-dot" id="dot-02"></span>DJ멘트</div>
+    <div class="pd"><span class="sk-dot" id="dot-04"></span>스토리보드</div>
+    <div class="pd"><span class="sk-dot" id="dot-05"></span>이미지</div>
+    <div class="pd"><span class="sk-dot" id="dot-07"></span>TTS</div>
+    <div class="pd"><span class="sk-dot" id="dot-08"></span>SRT</div>
   </div>
+
+  <button class="sk-btn tiny ghost" onclick="refreshAll()" style="margin-left:8px;">🔄 새로고침</button>
 </header>
 
-<!-- ===== TOPIC INPUT BAR ===== -->
-<div class="bg-gray-800 border-b border-gray-700 px-5 py-3 flex gap-3 items-end shrink-0">
-  <div class="flex-1 flex flex-col gap-1">
-    <input id="topic1" type="text" placeholder="テーマ1 (예: 健康)" class="bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-amber-500">
-    <span id="topic1-ko" class="text-xs text-amber-400 px-1 h-4"></span>
+<!-- ===== PIPELINE RAIL ===== -->
+<div id="pipeline-rail">
+  <span class="sk-label" style="margin-right:4px; flex-shrink:0;">파이프라인</span>
+  <div class="pipe-step" id="ps-00t"><div class="icon">🌐</div><div>트렌드</div><div class="step-id">00</div></div>
+  <span class="pipe-arrow">→</span>
+  <div class="pipe-step" id="ps-00p"><div class="icon">📋</div><div>플래너</div><div class="step-id">00p</div></div>
+  <span class="pipe-arrow">→</span>
+  <div class="pipe-step" id="ps-01"><div class="icon">📝</div><div>대본</div><div class="step-id">01</div></div>
+  <span class="pipe-arrow">→</span>
+  <div class="pipe-step" id="ps-01q"><div class="icon">🔍</div><div>QA</div><div class="step-id">01q</div></div>
+  <span class="pipe-arrow">→</span>
+  <div class="pipe-step" id="ps-02"><div class="icon">🤖</div><div>DJ멘트</div><div class="step-id">02</div></div>
+  <span class="pipe-arrow">→</span>
+  <div class="pipe-step" id="ps-03"><div class="icon">🎭</div><div>캐스팅</div><div class="step-id">03</div></div>
+  <span class="pipe-arrow">→</span>
+  <div class="pipe-step" id="ps-04"><div class="icon">🎬</div><div>스토리보드</div><div class="step-id">04</div></div>
+  <span class="pipe-arrow">→</span>
+  <div class="pipe-step" id="ps-05"><div class="icon">🖼</div><div>이미지</div><div class="step-id">05</div></div>
+  <span class="pipe-arrow">→</span>
+  <div class="pipe-step" id="ps-07"><div class="icon">🎧</div><div>TTS</div><div class="step-id">07</div></div>
+  <span class="pipe-arrow">→</span>
+  <div class="pipe-step" id="ps-06"><div class="icon">🎞</div><div>CapCut</div><div class="step-id">06</div></div>
+  <span class="pipe-arrow">→</span>
+  <div class="pipe-step" id="ps-08"><div class="icon">💬</div><div>자막</div><div class="step-id">08</div></div>
+</div>
+
+<!-- ===== TOPIC BAR ===== -->
+<div id="topic-bar">
+  <div class="topic-input-wrap">
+    <label>テーマ 1</label>
+    <input id="topic1" type="text" placeholder="健康、年金…">
+    <div class="topic-ko" id="topic1-ko"></div>
   </div>
-  <div class="flex-1 flex flex-col gap-1">
-    <input id="topic2" type="text" placeholder="テーマ2 (예: 財テク)" class="bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-amber-500">
-    <span id="topic2-ko" class="text-xs text-amber-400 px-1 h-4"></span>
+  <div class="topic-input-wrap">
+    <label>テーマ 2</label>
+    <input id="topic2" type="text" placeholder="財テク…">
+    <div class="topic-ko" id="topic2-ko"></div>
   </div>
-  <div class="flex-1 flex flex-col gap-1">
-    <input id="topic3" type="text" placeholder="テーマ3 (예: ロマンス)" class="bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-amber-500">
-    <span id="topic3-ko" class="text-xs text-amber-400 px-1 h-4"></span>
+  <div class="topic-input-wrap">
+    <label>テーマ 3</label>
+    <input id="topic3" type="text" placeholder="ロマンス…">
+    <div class="topic-ko" id="topic3-ko"></div>
   </div>
-  <div class="flex items-center gap-2 pb-5">
-    <label class="text-xs text-gray-400 whitespace-nowrap">
-      EP 번호
+  <div class="toggle-row">
+    <label>
+      <input type="checkbox" id="includeMz">
+      <span>🔥 MZ 사연</span>
     </label>
-    <input
-      type="number"
-      id="epNumber"
-      min="1"
-      placeholder="테스트면 비워두세요"
-      class="w-32 px-2 py-1 rounded text-xs bg-gray-800
-             border border-gray-600 text-white
-             placeholder-gray-500 focus:outline-none
-             focus:border-amber-500"
-    />
+    <label>
+      <input type="checkbox" id="includeQna">
+      <span>💬 Q&A 코너</span>
+    </label>
   </div>
-  <div class="flex flex-col gap-1 pb-5">
-    <button onclick="runFullPipeline()" class="bg-amber-500 hover:bg-amber-400 text-black font-bold px-4 py-1.5 rounded text-sm whitespace-nowrap transition-colors">
-      🎙 全工程 生成
-    </button>
-  </div>
-  <div class="flex flex-col gap-1 pb-5">
-    <button onclick="runFullPipeline(true)" class="bg-blue-500 hover:bg-blue-400 text-black font-bold px-4 py-1.5 rounded text-sm whitespace-nowrap transition-colors">
-      🌐 트렌드 자동 생성
-    </button>
+  <div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0;">
+    <button class="sk-btn primary" onclick="runFullPipeline(true)">🌐 트렌드 자동 생성</button>
+    <button class="sk-btn" onclick="runFullPipeline(false)">✍ 주제 직접 생성</button>
   </div>
 </div>
 
-<!-- ===== PIPELINE STEP BUTTONS ===== -->
-<div class="bg-gray-850 border-b border-gray-700 px-5 py-2 flex gap-2 items-center shrink-0" style="background:#111827">
-  <span class="text-xs text-gray-500 mr-1">개별 실행:</span>
-  <button onclick="runStep('01')" class="step-btn px-3 py-1 rounded text-xs bg-gray-700 hover:bg-amber-600 transition-colors">📝 01 대본</button>
-  <label class="flex items-center gap-1.5 cursor-pointer select-none ml-1 mr-2">
-    <input type="checkbox" id="includeMz" class="accent-amber-400 w-3.5 h-3.5">
-    <span class="text-xs text-amber-300 whitespace-nowrap">🔥 MZ 사연 1개 섞기</span>
-  </label>
-  <label class="flex items-center gap-1.5 cursor-pointer select-none mr-2">
-    <input type="checkbox" id="includeQna" class="accent-amber-400 w-3.5 h-3.5">
-    <span class="text-xs text-amber-300 whitespace-nowrap">💬 짤막 Q&A 추가</span>
-  </label>
-  <button onclick="runStep('02')" class="step-btn px-3 py-1 rounded text-xs bg-gray-700 hover:bg-amber-600 transition-colors">🤖 02 DJ멘트</button>
-  <button onclick="runStep('04')" class="step-btn px-3 py-1 rounded text-xs bg-gray-700 hover:bg-amber-600 transition-colors">🎬 03+04 스토리보드</button>
-  <button onclick="runStep('05', false)" class="step-btn px-3 py-1 rounded text-xs bg-gray-700 hover:bg-amber-600 transition-colors">🖼 05 이미지 (없는것만)</button>
-  <button onclick="runStep('05', true)" class="step-btn px-3 py-1 rounded text-xs bg-gray-700 hover:bg-red-700 transition-colors">🗑🖼 05 이미지 (전체 강제재생성)</button>
-  <button onclick="runStep('07')" class="step-btn px-3 py-1 rounded text-xs bg-gray-700 hover:bg-amber-600 transition-colors">🎧 07 TTS스크립트</button>
-  <button onclick="runStep('capcut')" class="step-btn px-3 py-1 rounded text-xs bg-gray-700 hover:bg-purple-600 transition-colors">🎬 CapCut 프로젝트 생성</button>
-  <div class="flex-1"></div>
-  <button onclick="refreshAll()" class="px-3 py-1 rounded text-xs bg-gray-700 hover:bg-gray-600 transition-colors">🔄 데이터 새로고침</button>
+<!-- ===== STEP BUTTONS BAR ===== -->
+<div id="step-bar">
+  <span class="bar-label">개별 실행</span>
+  <button class="sk-btn tiny" onclick="runStep('01')">📝 01 대본</button>
+  <button class="sk-btn tiny" onclick="runStep('02')">🤖 02 DJ멘트</button>
+  <button class="sk-btn tiny" onclick="runStep('04')">🎬 03+04 스토리보드</button>
+  <button class="sk-btn tiny" onclick="runStep('05', false)">🖼 05 이미지 (없는것만)</button>
+  <button class="sk-btn tiny" style="border-color:var(--bad);color:var(--bad);" onclick="runStep('05', true)">🗑🖼 전체 강제재생성</button>
+  <button class="sk-btn tiny" onclick="runStep('07')">🎧 07 TTS</button>
+  <button class="sk-btn tiny" onclick="runStep('capcut')">🎞 CapCut</button>
 </div>
 
-<!-- ===== MAIN CONTENT ===== -->
-<div class="flex flex-1 overflow-hidden">
+<!-- ===== MAIN 3-COLUMN ===== -->
+<div id="main">
 
-  <!-- LEFT: Text Editor Panel -->
-  <div class="w-2/5 flex flex-col border-r border-gray-700 overflow-hidden">
-
-    <!-- Editor Tabs -->
-    <div class="flex border-b border-gray-700 bg-gray-800 shrink-0">
-      <button onclick="setTab('scripts')" id="tab-scripts" class="tab-btn px-4 py-2 text-xs font-medium border-b-2 border-amber-500 text-amber-400">📄 대본 (01)</button>
-      <button onclick="setTab('dj')" id="tab-dj" class="tab-btn px-4 py-2 text-xs font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">🤖 DJ멘트 (02)</button>
-      <button onclick="setTab('audio')" id="tab-audio" class="tab-btn px-4 py-2 text-xs font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">🎧 TTS스크립트 (07)</button>
-      <div class="flex-1"></div>
-      <button onclick="saveText()" class="px-3 py-1 m-1 text-xs bg-green-700 hover:bg-green-600 rounded transition-colors">💾 저장</button>
+  <!-- LEFT: Script Editor -->
+  <div id="col-left">
+    <div id="editor-tabs">
+      <button class="ed-tab active" id="tab-scripts" onclick="setTab('scripts')">📄 대본</button>
+      <button class="ed-tab" id="tab-dj" onclick="setTab('dj')">🤖 DJ멘트</button>
+      <button class="ed-tab" id="tab-audio" onclick="setTab('audio')">🎧 TTS스크립트</button>
+      <button class="sk-btn tiny ghost" id="editor-save-btn" onclick="saveText()">💾 저장</button>
     </div>
 
-    <!-- Editor Textarea -->
-    <div class="flex-1 flex flex-col overflow-hidden p-3 gap-2">
-      <textarea id="editor"
-        class="flex-1 bg-gray-800 border border-gray-700 rounded p-3 text-xs font-mono text-gray-200 focus:outline-none focus:border-amber-500 leading-relaxed"
-        placeholder="파이프라인을 실행하면 여기에 텍스트가 표시됩니다..."
-        spellcheck="false"></textarea>
+    <div id="editor-body">
+      <textarea id="editor" spellcheck="false" placeholder="파이프라인을 실행하면 여기에 텍스트가 표시됩니다…"></textarea>
 
-      <!-- Translation buttons + panel -->
       <div>
-        <button onclick="translateText()" class="w-full py-1.5 text-xs bg-blue-700 hover:bg-blue-600 rounded transition-colors font-medium">
-          🇰🇷 한국어로 번역 보기
-        </button>
-        <div id="translate-panel" class="hidden mt-2 fade-in">
-          <div class="flex items-center justify-between mb-1">
-            <span class="text-xs text-blue-400 font-medium">🇰🇷 한국어 번역 (읽기 전용)</span>
-            <button onclick="closeTranslation()" class="text-xs text-gray-500 hover:text-gray-300">✕ 닫기</button>
+        <button class="sk-btn tiny ghost" id="translate-btn" onclick="translateText()" style="width:100%;">🇰🇷 한국어로 번역 보기</button>
+        <div id="translate-panel" style="margin-top:6px;">
+          <div class="tl-header">
+            <span>🇰🇷 한국어 번역 (읽기 전용)</span>
+            <button class="sk-btn tiny ghost" onclick="closeTranslation()">✕</button>
           </div>
-          <div id="translate-result"
-            class="bg-gray-700 border border-blue-800 rounded p-3 text-xs text-blue-100 leading-relaxed max-h-48 overflow-y-auto font-mono whitespace-pre-wrap"
-          >번역 중 ⏳...</div>
+          <div id="translate-result">번역 중 ⏳…</div>
         </div>
       </div>
     </div>
+
+    <div id="qa-strip">QA 점수: <span id="qa-score-text" style="color:var(--ink-soft);">—</span></div>
   </div>
 
-  <!-- RIGHT: Image Gallery + Log -->
-  <div class="flex-1 flex flex-col overflow-hidden">
-
-    <!-- Log Panel (collapsible) -->
-    <div id="log-panel" class="bg-gray-950 border-b border-gray-700 shrink-0" style="height:120px; display:none;">
-      <div class="flex items-center justify-between px-3 py-1 border-b border-gray-800">
-        <span class="text-xs text-gray-400">📟 실행 로그</span>
-        <button onclick="toggleLog()" class="text-xs text-gray-500 hover:text-gray-300">✕ 닫기</button>
-      </div>
-      <div id="log-content" class="overflow-y-auto font-mono text-xs p-2" style="height:88px;"></div>
+  <!-- MIDDLE: Scene Gallery -->
+  <div id="col-mid">
+    <div id="gallery-header">
+      <span class="gh-title">🖼 씬 갤러리</span>
+      <span class="sk-tag">EP1</span>
+      <span class="sk-tag">EP2</span>
+      <span class="sk-tag">EP3</span>
+      <span id="gallery-count" style="margin-left:auto;"></span>
+      <button class="sk-btn tiny ghost" onclick="loadGallery()">🔄</button>
     </div>
-
-    <!-- Gallery Header -->
-    <div class="flex items-center gap-3 px-4 py-2 border-b border-gray-700 bg-gray-800 shrink-0">
-      <span class="text-sm font-semibold text-gray-300">🖼 이미지 갤러리</span>
-      <span id="gallery-count" class="text-xs text-gray-500"></span>
-      <div class="flex-1"></div>
-      <button onclick="loadGallery()" class="text-xs text-gray-500 hover:text-gray-300">🔄 새로고침</button>
-    </div>
-
-    <!-- Gallery Grid -->
-    <div id="gallery" class="flex-1 overflow-y-auto p-3">
-      <div class="text-center text-gray-600 text-sm mt-20">
-        <div class="text-4xl mb-3">🎞</div>
-        <p>이미지 생성 후 여기에 표시됩니다</p>
-        <p class="text-xs mt-1">05 이미지 스텝을 실행하세요</p>
+    <div id="gallery">
+      <div class="gallery-empty">
+        <div class="empty-icon">🎞</div>
+        <div>이미지 생성 후 여기에 표시됩니다</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:0.75em;color:var(--ink-faint);">05 이미지 스텝을 실행하세요</div>
       </div>
     </div>
   </div>
+
+  <!-- RIGHT: Log + Output -->
+  <div id="col-right">
+    <div id="log-panel">
+      <div id="log-header">
+        <span class="lh-title">📟 실행 로그</span>
+        <span class="sk-dot" id="log-dot"></span>
+      </div>
+      <div id="log-content"></div>
+    </div>
+
+    <div id="output-panel">
+      <div class="op-label">출력</div>
+      <div id="output-btns">
+        <button class="sk-btn tiny" onclick="runStep('capcut')">🎞 CapCut</button>
+        <button class="sk-btn tiny" onclick="openOutputFolder()">📁 폴더</button>
+        <button class="sk-btn tiny" onclick="runStep('srt')">💬 SRT</button>
+      </div>
+
+      <div id="ep-bar">
+        <span style="flex-shrink:0;">EP 복구</span>
+        <input id="epResumeId" placeholder="EP_20260418_1234" />
+        <button class="sk-btn tiny" onclick="resumeEp()">↩ 복구</button>
+      </div>
+    </div>
+  </div>
+
 </div>
 
+<div id="toast"></div>
+
 <script>
-// ─── State ──────────────────────────────────────────────────────────────────
+// ─── State ────────────────────────────────────────────────────────────────────
 let currentTab = 'scripts';
 let currentScriptsData = null;
 let currentDjData = null;
@@ -182,38 +726,35 @@ let currentAudioText = '';
 let storyboardScenes = [];
 let currentEpId = null;
 
-// EP_ID 동기화 — 서버의 currentEpId를 주기적으로 polling
+// EP_ID 동기화
 async function syncEpId() {
   try {
     const r = await fetch('/api/current-ep');
     if (r.ok) {
       const d = await r.json();
       currentEpId = d.ep_id || null;
+      if (currentEpId) {
+        document.getElementById('ep-info').textContent = `ガラクタロボ v3.2 · ${currentEpId}`;
+      }
     }
   } catch {}
 }
-// 페이지 로드 즉시 + 30초마다 갱신
 syncEpId();
 setInterval(syncEpId, 30000);
 
-// ─── Tab Management ──────────────────────────────────────────────────────────
+// ─── Tab Management ────────────────────────────────────────────────────────────
 function setTab(tab) {
   currentTab = tab;
-  document.querySelectorAll('.tab-btn').forEach(b => {
-    b.classList.remove('border-amber-500', 'text-amber-400');
-    b.classList.add('border-transparent', 'text-gray-400');
-  });
+  document.querySelectorAll('.ed-tab').forEach(b => b.classList.remove('active'));
   const active = document.getElementById(`tab-${tab}`);
-  active.classList.add('border-amber-500', 'text-amber-400');
-  active.classList.remove('border-transparent', 'text-gray-400');
+  if (active) active.classList.add('active');
   closeTranslation();
-
   if (tab === 'scripts') renderScriptsToEditor();
   else if (tab === 'dj') renderDjToEditor();
   else if (tab === 'audio') renderAudioToEditor();
 }
 
-// ─── Data Rendering ──────────────────────────────────────────────────────────
+// ─── Data Rendering ────────────────────────────────────────────────────────────
 function renderScriptsToEditor() {
   if (!currentScriptsData) {
     document.getElementById('editor').value = '(데이터 없음 — 01 대본 스텝을 먼저 실행하세요)';
@@ -271,10 +812,9 @@ function renderAudioToEditor() {
   document.getElementById('editor').value = currentAudioText || '(데이터 없음 — 07 TTS스크립트 스텝을 먼저 실행하세요)';
 }
 
-// ─── Save Text ───────────────────────────────────────────────────────────────
+// ─── Save ─────────────────────────────────────────────────────────────────────
 async function saveText() {
   const text = document.getElementById('editor').value;
-
   if (currentTab === 'audio') {
     await fetch('/api/data/audio', {
       method: 'PUT',
@@ -285,21 +825,17 @@ async function saveText() {
     showToast('💾 TTS 스크립트 저장 완료');
     return;
   }
-
-  // For scripts/dj, show info that raw JSON editing isn't supported in view mode
-  showToast('ℹ️ TTS스크립트 탭에서만 직접 저장 가능. JSON은 파일을 직접 수정하세요.', 3000);
+  showToast('ℹ️ TTS스크립트 탭에서만 직접 저장 가능');
 }
 
-// ─── Translation ─────────────────────────────────────────────────────────────
+// ─── Translation ───────────────────────────────────────────────────────────────
 async function translateText() {
   const text = document.getElementById('editor').value;
   if (!text || text.startsWith('(데이터 없음')) return;
-
   const panel = document.getElementById('translate-panel');
   const result = document.getElementById('translate-result');
-  panel.classList.remove('hidden');
-  result.textContent = '번역 중 ⏳...';
-
+  panel.style.display = 'block';
+  result.textContent = '번역 중 ⏳…';
   try {
     const resp = await fetch('/api/translate', {
       method: 'POST',
@@ -313,145 +849,144 @@ async function translateText() {
     result.textContent = `❌ 번역 실패: ${err.message}`;
   }
 }
-
 function closeTranslation() {
-  document.getElementById('translate-panel').classList.add('hidden');
+  document.getElementById('translate-panel').style.display = 'none';
 }
 
-// ─── Pipeline Execution ───────────────────────────────────────────────────────
+// ─── Pipeline ─────────────────────────────────────────────────────────────────
 async function runFullPipeline(autoTrend = false) {
   let topics = ['', '', ''];
   if (!autoTrend) {
     const t1 = document.getElementById('topic1').value.trim();
     const t2 = document.getElementById('topic2').value.trim();
     const t3 = document.getElementById('topic3').value.trim();
-    if (!t1 || !t2 || !t3) { showToast('❌ 주제 3개를 모두 입력하세요', 2000); return; }
+    if (!t1 || !t2 || !t3) { showToast('❌ 주제 3개를 모두 입력하세요'); return; }
     topics = [t1, t2, t3];
   }
 
-  showLog();
-  appendLog(autoTrend ? '=== 🌐 트렌드 자동 파이프라인 開始 ===' : '=== 全工程 パイプライン 開始 ===', 'log');
+  setPipeStep('00t', autoTrend ? 'run' : 'idle');
+  appendLog(autoTrend ? '=== 🌐 트렌드 자동 파이프라인 開始 ===' : '=== 全工程 パイプライン 開始 ===');
 
-  // 01 대본
-  const _includeMz = document.getElementById('includeMz').checked;
+  const _includeMz  = document.getElementById('includeMz').checked;
   const _includeQna = document.getElementById('includeQna').checked;
-  if (_includeMz) appendLog('🔥 MZ 모드 체크됨 — --mz 플래그 전송 중', 'log');
-  const epNum = document.getElementById('epNumber').value.trim();
-  let r = await streamStep('/api/generate-scripts', { topics, includeMz: _includeMz, includeQna: _includeQna, autoTrend, epNum: epNum ? parseInt(epNum) : null });
-  if (!r.success) { setDot('01', 'red'); appendLog('❌ 01 대본 실패 — 파이프라인 중단', 'error'); showToast('❌ 01 대본 생성 실패'); return; }
-  await loadScripts(); setDot('01', 'green'); setTab('scripts');
+  if (_includeMz) appendLog('🔥 MZ 모드 활성');
 
-  // 02 DJ멘트
+  setPipeStep('01', 'run'); setDot('01', 'run');
+  let r = await streamStep('/api/generate-scripts', { topics, includeMz: _includeMz, includeQna: _includeQna, autoTrend });
+  if (!r.success) { setPipeStep('01','bad'); setDot('01','bad'); appendLog('❌ 01 대본 실패', 'error'); showToast('❌ 대본 생성 실패'); return; }
+  setPipeStep('01','ok'); setPipeStep('01q','ok'); setDot('01','ok');
+  await loadScripts(); setTab('scripts');
+
+  setPipeStep('02','run'); setDot('02','run');
   r = await streamStep('/api/generate-dj', { includeQna: _includeQna });
-  if (!r.success) { setDot('02', 'red'); appendLog('❌ 02 DJ멘트 실패 — 파이프라인 중단', 'error'); showToast('❌ 02 DJ멘트 생성 실패'); return; }
-  await loadDj(); setDot('02', 'green'); setTab('dj');
+  if (!r.success) { setPipeStep('02','bad'); setDot('02','bad'); appendLog('❌ 02 DJ멘트 실패','error'); showToast('❌ DJ멘트 생성 실패'); return; }
+  setPipeStep('02','ok'); setDot('02','ok');
+  await loadDj(); setTab('dj');
 
-  // 03+04 스토리보드 (casting + storyboard는 치명적 실패만 중단, visual QA는 경고 후 계속)
+  setPipeStep('03','run'); setPipeStep('04','run'); setDot('04','run');
   r = await streamStep('/api/generate-storyboard', {});
-  if (!r.success) { setDot('04', 'red'); appendLog('❌ 03+04 스토리보드 실패 — 파이프라인 중단', 'error'); showToast('❌ 스토리보드 생성 실패'); return; }
-  await loadStoryboard(); setDot('04', 'green');
+  if (!r.success) { setPipeStep('04','bad'); setDot('04','bad'); appendLog('❌ 스토리보드 실패','error'); showToast('❌ 스토리보드 실패'); return; }
+  setPipeStep('03','ok'); setPipeStep('04','ok'); setDot('04','ok');
+  await loadStoryboard();
 
-  // 05 이미지 — 생성 중 4초마다 갤러리 폴링 (실패해도 TTS·CapCut은 계속)
-  setTab('gallery');
+  setPipeStep('05','run'); setDot('05','run');
   const imgPoll = setInterval(() => loadGallery(), 4000);
   r = await streamStep('/api/generate-images', {});
   clearInterval(imgPoll);
   if (!r.success) {
-    setDot('05', 'yellow');
-    appendLog('⚠️ 05 이미지 일부 실패 — TTS·CapCut 계속 진행', 'log');
-    showToast('⚠️ 이미지 일부 실패 — TTS 계속 진행');
+    setPipeStep('05','warn'); setDot('05','warn');
+    appendLog('⚠️ 이미지 일부 실패 — 계속 진행');
+    showToast('⚠️ 이미지 일부 실패');
   } else {
-    await loadGallery(); setDot('05', 'green');
+    setPipeStep('05','ok'); setDot('05','ok');
+    await loadGallery();
   }
 
-  // 07 TTS + 06 CapCut (오디오 generate-audio-script에 CapCut 빌드 포함)
+  setPipeStep('07','run'); setDot('07','run');
   r = await streamStep('/api/generate-audio-script', {});
-  if (!r.success) { setDot('07', 'red'); appendLog('❌ 07 TTS 실패', 'error'); showToast('❌ TTS 생성 실패'); return; }
-  await loadAudio(); setDot('07', 'green'); setTab('audio');
+  if (!r.success) { setPipeStep('07','bad'); setDot('07','bad'); appendLog('❌ TTS 실패','error'); showToast('❌ TTS 실패'); return; }
+  setPipeStep('06','ok'); setPipeStep('07','ok'); setPipeStep('08','ok');
+  setDot('07','ok'); setDot('08','ok');
+  await loadAudio(); setTab('audio');
 
-  appendLog('=== ✅ 全工程 完了 — 대본·DJ·스토리보드·이미지·TTS·CapCut ===', 'log');
+  appendLog('=== ✅ 全工程 完了 ===', 'ok');
   showToast('🎉 전체 파이프라인 완료!');
 }
 
 async function runStep(step, force = false) {
-  showLog();
   const endpoints = {
-    '01': ['/api/generate-scripts', () => {
+    '01':     ['/api/generate-scripts', () => {
       const t1 = document.getElementById('topic1').value.trim();
       const t2 = document.getElementById('topic2').value.trim();
       const t3 = document.getElementById('topic3').value.trim();
       if (!t1 || !t2 || !t3) { showToast('❌ 주제 3개를 입력하세요'); return null; }
-      const mz = document.getElementById('includeMz').checked;
-      const qna = document.getElementById('includeQna').checked;
-      if (mz) appendLog('🔥 MZ 모드 체크됨 — --mz 플래그 전송 중', 'log');
-      return { topics: [t1, t2, t3], includeMz: mz, includeQna: qna };
+      return { topics:[t1,t2,t3], includeMz: document.getElementById('includeMz').checked, includeQna: document.getElementById('includeQna').checked };
     }],
-    '02': ['/api/generate-dj', () => ({ includeQna: document.getElementById('includeQna').checked })],
-    '04': ['/api/generate-storyboard', () => ({})],
-    '05': ['/api/generate-images', () => ({ force })],
-    '07': ['/api/generate-audio-script', () => ({})],
-    'capcut':     ['/api/generate-capcut',      () => ({})],
+    '02':     ['/api/generate-dj', () => ({ includeQna: document.getElementById('includeQna').checked })],
+    '04':     ['/api/generate-storyboard', () => ({})],
+    '05':     ['/api/generate-images', () => ({ force })],
+    '07':     ['/api/generate-audio-script', () => ({})],
+    'capcut': ['/api/generate-capcut', () => ({})],
+    'srt':    ['/api/generate-srt', () => ({})],
   };
-
   const [url, getBody] = endpoints[step] || [];
   if (!url) return;
   const body = getBody();
   if (body === null) return;
-
   await streamStep(url, body);
-
-  if (step === '01') { await loadScripts(); setDot('01', 'green'); setTab('scripts'); }
-  if (step === '02') { await loadDj(); setDot('02', 'green'); setTab('dj'); }
-  if (step === '04') { await loadStoryboard(); setDot('04', 'green'); }
-  if (step === '05') { await loadGallery(); setDot('05', 'green'); }
-  if (step === '07') { await loadAudio(); setDot('07', 'green'); setTab('audio'); }
+  if (step === '01') { await loadScripts(); setDot('01','ok'); setTab('scripts'); }
+  if (step === '02') { await loadDj(); setDot('02','ok'); setTab('dj'); }
+  if (step === '04') { await loadStoryboard(); setDot('04','ok'); }
+  if (step === '05') { await loadGallery(); setDot('05','ok'); }
+  if (step === '07') { await loadAudio(); setDot('07','ok'); setTab('audio'); }
 }
 
 function streamStep(url, body) {
   return new Promise((resolve) => {
-    fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }).then(resp => {
-      if (!resp.body) { resolve({ success: false }); return; }
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = '';
-
-      function pump() {
-        reader.read().then(({ done, value }) => {
-          if (done) { resolve({ success: true }); return; }
-          buf += decoder.decode(value, { stream: true });
-          const parts = buf.split('\n\n');
-          buf = parts.pop();
-          for (const part of parts) {
-            if (!part.startsWith('data: ')) continue;
-            try {
-              const evt = JSON.parse(part.slice(6));
-              if (evt.type === 'log') {
-                // TREND_TOPICS 특수 로그 감지 → input 박스 자동 채움
-                if (evt.message.startsWith('TREND_TOPICS:')) {
-                  const tTopics = evt.message.replace('TREND_TOPICS:', '').split('|');
-                  if (tTopics.length >= 3) {
-                    document.getElementById('topic1').value = tTopics[0].trim();
-                    document.getElementById('topic2').value = tTopics[1].trim();
-                    document.getElementById('topic3').value = tTopics[2].trim();
-                    showToast('🌐 트렌드 주제 자동 입력 완료');
+    setLogRunning(true);
+    fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
+      .then(resp => {
+        if (!resp.body) { resolve({ success:false }); return; }
+        const reader = resp.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+        function pump() {
+          reader.read().then(({ done, value }) => {
+            if (done) { setLogRunning(false); resolve({ success:true }); return; }
+            buf += dec.decode(value, { stream:true });
+            const parts = buf.split('\n\n');
+            buf = parts.pop();
+            for (const part of parts) {
+              if (!part.startsWith('data: ')) continue;
+              try {
+                const evt = JSON.parse(part.slice(6));
+                if (evt.type === 'log') {
+                  if (evt.message.startsWith('TREND_TOPICS:')) {
+                    const tt = evt.message.replace('TREND_TOPICS:','').split('|');
+                    if (tt.length >= 3) {
+                      document.getElementById('topic1').value = tt[0].trim();
+                      document.getElementById('topic2').value = tt[1].trim();
+                      document.getElementById('topic3').value = tt[2].trim();
+                      showToast('🌐 트렌드 주제 자동 입력 완료');
+                    }
+                  } else {
+                    appendLog(evt.message);
                   }
-                } else {
-                  appendLog(evt.message, 'log');
-
+                } else if (evt.type === 'error') {
+                  appendLog(evt.message, 'error');
+                } else if (evt.type === 'done') {
+                  setLogRunning(false);
+                  resolve({ success: evt.code === 0 });
+                  return;
                 }
-              } else if (evt.type === 'error') appendLog(evt.message, 'error');
-              else if (evt.type === 'done') { resolve({ success: evt.code === 0 }); return; }
-            } catch {}
-          }
-          pump();
-        });
-      }
-      pump();
-    }).catch(err => { appendLog(`❌ ${err.message}`, 'error'); resolve({ success: false }); });
+              } catch {}
+            }
+            pump();
+          });
+        }
+        pump();
+      })
+      .catch(err => { appendLog(`❌ ${err.message}`, 'error'); setLogRunning(false); resolve({ success:false }); });
   });
 }
 
@@ -462,46 +997,42 @@ async function loadScripts() {
     if (resp.ok) {
       currentScriptsData = await resp.json();
       if (currentTab === 'scripts') renderScriptsToEditor();
-      setDot('01', 'green');
+      setDot('01','ok');
     }
   } catch {}
 }
-
 async function loadDj() {
   try {
     const resp = await fetch(`/api/data/dj?t=${Date.now()}`);
     if (resp.ok) {
       currentDjData = await resp.json();
       if (currentTab === 'dj') renderDjToEditor();
-      setDot('02', 'green');
+      setDot('02','ok');
     }
   } catch {}
 }
-
 async function loadAudio() {
   try {
     const resp = await fetch(`/api/data/audio?t=${Date.now()}`);
     if (resp.ok) {
       currentAudioText = await resp.text();
       if (currentTab === 'audio') renderAudioToEditor();
-      setDot('07', 'green');
+      setDot('07','ok');
     }
   } catch {}
 }
-
 async function loadStoryboard() {
   try {
     const resp = await fetch(`/api/data/storyboard?t=${Date.now()}`);
     if (resp.ok) {
       const data = await resp.json();
       storyboardScenes = data.scenes
-        ?? data.episodes?.flatMap(ep => (ep.scenes || []).map(s => ({ ...s, episode_id: ep.episode_id ?? ep.id })))
+        ?? data.episodes?.flatMap(ep => (ep.scenes||[]).map(s => ({ ...s, episode_id: ep.episode_id ?? ep.id })))
         ?? [];
-      setDot('04', 'green');
+      setDot('04','ok');
     }
   } catch {}
 }
-
 async function loadGallery() {
   try {
     await loadStoryboard();
@@ -509,136 +1040,137 @@ async function loadGallery() {
     if (!resp.ok) return;
     const data = await resp.json();
     renderGallery(data.results || []);
-    setDot('05', 'green');
+    setDot('05','ok');
   } catch {}
 }
 
 function renderGallery(results) {
   const gallery = document.getElementById('gallery');
   if (!results.length) {
-    gallery.innerHTML = '<div class="text-center text-gray-600 text-sm mt-20"><div class="text-4xl mb-3">🎞</div><p>이미지 없음</p></div>';
+    gallery.innerHTML = '<div class="gallery-empty"><div class="empty-icon">🎞</div><div>이미지 없음</div></div>';
     return;
   }
-
   const sceneMap = {};
   storyboardScenes.forEach(s => { sceneMap[s.scene_id] = s; });
-
   const successCount = results.filter(r => r.status === 'success' || r.status === 'skipped').length;
   document.getElementById('gallery-count').textContent = `${successCount} / ${results.length} 씬`;
 
-  gallery.innerHTML = `<div class="grid grid-cols-2 xl:grid-cols-3 gap-3">
-    ${results.map(item => {
-      const scene = sceneMap[item.scene_id] || {};
-      const isOk = item.status === 'success' || item.status === 'skipped';
-      const imgUrl = isOk && currentEpId ? `/output/${currentEpId}/images/${item.scene_id}.png` : '';
-      const dialogue = scene.japanese_dialogue || scene.visual_prompt_en?.slice(0, 80) || '';
-      return `
-      <div class="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden hover:border-amber-500 transition-colors" id="card-${item.scene_id}">
-        <div class="relative" style="aspect-ratio:16/9; background:#111;">
-          ${isOk
-            ? `<img src="${imgUrl}" alt="${item.scene_id}" class="w-full h-full object-cover" loading="lazy" onerror="this.style.display='none'">`
-            : `<div class="flex items-center justify-center h-full text-red-500 text-xs">❌ 실패</div>`
-          }
-          <div class="absolute top-1 left-1">
-            <span class="text-xs px-1.5 py-0.5 rounded font-mono font-bold ${scene.type === 'DJ_SHOT' ? 'bg-amber-600' : 'bg-blue-700'}">${item.scene_id}</span>
-          </div>
+  gallery.innerHTML = `<div class="gallery-grid">${results.map(item => {
+    const scene = sceneMap[item.scene_id] || {};
+    const isOk = item.status === 'success' || item.status === 'skipped';
+    const imgUrl = isOk && currentEpId ? `/output/${currentEpId}/images/${item.scene_id}.png` : '';
+    const isDj = scene.type === 'DJ_SHOT';
+    const dialogue = scene.japanese_dialogue || scene.visual_prompt_en?.slice(0, 80) || '';
+    return `<div class="scene-card fade-in" id="card-${item.scene_id}">
+      <div class="card-img">
+        ${isOk
+          ? `<img src="${imgUrl}" alt="${item.scene_id}" loading="lazy" onerror="this.style.display='none'">`
+          : `<div class="img-placeholder ${item.status === 'pending' ? 'running' : ''}">
+               ${item.status === 'pending' ? '⏳ 생성 중…' : '❌ 실패'}
+             </div>`}
+        <span class="scene-id-badge${isDj ? ' dj' : ''}">${item.scene_id}</span>
+      </div>
+      <div class="card-body">
+        <div class="card-type">${scene.type || ''} · ${scene.speaker || ''}</div>
+        <div class="card-text">「${dialogue}」</div>
+        <div class="card-actions">
+          <button class="sk-btn tiny" style="flex:1" onclick="regenerateImage('${item.scene_id}')">🔄 재생성</button>
+          <button class="sk-btn tiny ghost">✏</button>
         </div>
-        <div class="p-2">
-          <div class="text-xs text-gray-500 mb-1 truncate">${scene.speaker || scene.type || ''}</div>
-          <div class="text-xs text-gray-400 line-clamp-2 mb-2" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${dialogue}</div>
-          <button onclick="regenerateImage('${item.scene_id}')"
-            class="w-full py-1 text-xs bg-gray-700 hover:bg-amber-600 rounded transition-colors">
-            🔄 재생성
-          </button>
-        </div>
-      </div>`;
-    }).join('')}
-  </div>`;
+      </div>
+    </div>`;
+  }).join('')}</div>`;
 }
 
 async function regenerateImage(scene_id) {
   const card = document.getElementById(`card-${scene_id}`);
-  if (card) {
-    const btn = card.querySelector('button');
-    btn.textContent = '⏳ 생성 중...';
-    btn.disabled = true;
-    // Dim the image
-    const img = card.querySelector('img');
-    if (img) img.style.opacity = '0.4';
-  }
-
+  const btn = card?.querySelector('.card-actions .sk-btn');
+  if (btn) { btn.textContent = '⏳…'; btn.disabled = true; }
+  const img = card?.querySelector('img');
+  if (img) img.style.opacity = '0.4';
   try {
     const resp = await fetch('/api/regenerate-image', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ scene_id }),
     });
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
-
-    // Update image in card
-    const img = card?.querySelector('img');
-    if (img) {
-      img.src = data.url;
-      img.style.opacity = '1';
-    }
-    const btn = card?.querySelector('button');
+    if (img) { img.src = data.url; img.style.opacity = '1'; }
     if (btn) { btn.textContent = '🔄 재생성'; btn.disabled = false; }
     showToast(`✅ ${scene_id} 재생성 완료`);
   } catch (err) {
     showToast(`❌ ${scene_id} 실패: ${err.message}`, 4000);
-    const btn = card?.querySelector('button');
     if (btn) { btn.textContent = '🔄 재생성'; btn.disabled = false; }
-    const img = card?.querySelector('img');
     if (img) img.style.opacity = '1';
   }
 }
 
-// ─── Log Panel ────────────────────────────────────────────────────────────────
-function showLog() {
-  document.getElementById('log-panel').style.display = 'block';
+// ─── EP Resume ────────────────────────────────────────────────────────────────
+async function resumeEp() {
+  const ep_id = document.getElementById('epResumeId').value.trim();
+  if (!ep_id) { showToast('❌ EP_ID를 입력하세요'); return; }
+  try {
+    const r = await fetch('/api/resume-ep', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ ep_id }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    currentEpId = ep_id;
+    document.getElementById('ep-info').textContent = `ガラクタロボ v3.2 · ${ep_id}`;
+    showToast(`✅ EP 복구: ${ep_id}`);
+    await refreshAll();
+  } catch (err) {
+    showToast(`❌ EP 복구 실패: ${err.message}`);
+  }
 }
-function toggleLog() {
-  const p = document.getElementById('log-panel');
-  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+
+function openOutputFolder() {
+  showToast('📁 출력 폴더는 .output/ 디렉토리를 확인하세요');
 }
+
+// ─── Log ──────────────────────────────────────────────────────────────────────
 function appendLog(msg, type = 'log') {
   const content = document.getElementById('log-content');
   const line = document.createElement('div');
-  line.className = type === 'error' ? 'log-line-error' : 'log-line-log';
-  line.textContent = msg;
+  const typeClass = type === 'error' ? 'log-line-error' : type === 'ok' ? 'log-line-ok' : 'log-line-log';
+  line.className = typeClass;
+  const ts = new Date().toLocaleTimeString('ko-KR', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  line.textContent = `[${ts}] ${msg}`;
   content.appendChild(line);
   content.scrollTop = content.scrollHeight;
 }
+function setLogRunning(running) {
+  const dot = document.getElementById('log-dot');
+  if (dot) dot.className = `sk-dot ${running ? 'run' : ''}`;
+}
 
-// ─── Status Dots ─────────────────────────────────────────────────────────────
-function setDot(step, color) {
+// ─── Dots + Pipeline Steps ────────────────────────────────────────────────────
+function setDot(step, status) {
   const el = document.getElementById(`dot-${step}`);
   if (!el) return;
-  const dot = el.querySelector('span');
-  dot.className = `w-2 h-2 rounded-full bg-${color}-500`;
+  el.className = `sk-dot ${status}`;
+}
+function setPipeStep(id, status) {
+  const el = document.getElementById(`ps-${id}`);
+  if (!el) return;
+  el.className = `pipe-step s-${status}`;
 }
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
-function showToast(msg, duration = 2000) {
-  let toast = document.getElementById('toast');
-  if (!toast) {
-    toast = document.createElement('div');
-    toast.id = 'toast';
-    toast.className = 'fixed bottom-5 right-5 bg-gray-700 text-white text-sm px-4 py-2 rounded shadow-lg z-50 transition-opacity';
-    document.body.appendChild(toast);
-  }
+function showToast(msg, duration = 2200) {
+  const toast = document.getElementById('toast');
   toast.textContent = msg;
   toast.style.opacity = '1';
-  clearTimeout(toast._timer);
-  toast._timer = setTimeout(() => { toast.style.opacity = '0'; }, duration);
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { toast.style.opacity = '0'; }, duration);
 }
 
-// ─── Refresh All ─────────────────────────────────────────────────────────────
+// ─── Refresh ──────────────────────────────────────────────────────────────────
 async function refreshAll() {
   await Promise.all([loadScripts(), loadDj(), loadAudio(), loadGallery()]);
   setTab(currentTab);
-  showToast('🔄 데이터 새로고침 완료');
+  showToast('🔄 새로고침 완료');
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────────

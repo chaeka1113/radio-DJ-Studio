@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>テンキ爺ラジオ — 와이어프레임 탐색</title>
+<link rel="stylesheet" href="styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body class="lang-ko fidelity-sketch density-cozy">
+
+<div class="tabbar">
+  <h2>📻 라디오DJ 대시보드 — 와이어프레임 탐색</h2>
+  <button class="tab active" data-v="cockpit"><span class="num">①</span> 콕핏</button>
+  <button class="tab" data-v="timeline"><span class="num">②</span> 타임라인</button>
+  <button class="tab" data-v="scenestrip"><span class="num">③</span> 씬 스트립</button>
+  <button class="tab" data-v="wallmode"><span class="num">④</span> 벽걸이 모니터</button>
+  <button class="tab" data-v="library"><span class="num">⑤</span> EP 라이브러리</button>
+  <button class="tab" data-v="trend"><span class="num">⑥</span> 트렌드 카드</button>
+  <div style="flex:1"></div>
+  <button class="sk-btn tiny" id="tweaks-toggle">⚙ Tweaks</button>
+</div>
+
+<div id="root"></div>
+
+<div class="tweaks-panel" id="tweaks-panel">
+  <h3>⚙ Tweaks</h3>
+  <label>충실도
+    <select id="tw-fidelity">
+      <option value="sketch">스케치</option>
+      <option value="mid">그레이스케일</option>
+    </select>
+  </label>
+  <label>라벨 언어
+    <select id="tw-lang">
+      <option value="ko">한국어</option>
+      <option value="ja">일본어</option>
+    </select>
+  </label>
+  <label>밀도
+    <select id="tw-density">
+      <option value="cozy">cozy</option>
+      <option value="compact">compact</option>
+    </select>
+  </label>
+  <label>모두 보기
+    <input type="checkbox" id="tw-all" />
+  </label>
+  <hr style="margin:8px 0; border-color: #ddd"/>
+  <div style="font-size: 11px; color: var(--ink-soft); font-family: 'JetBrains Mono'; line-height:1.6">
+    <div>← / → 키로 탭 이동</div>
+    <div>1–6 키로 직접 이동</div>
+  </div>
+</div>
+
+<script type="text/babel" src="sketch_primitives.jsx"></script>
+<script type="text/babel" src="v1_cockpit.jsx"></script>
+<script type="text/babel" src="v2_timeline.jsx"></script>
+<script type="text/babel" src="v3_scenestrip.jsx"></script>
+<script type="text/babel" src="v4_wallmode.jsx"></script>
+<script type="text/babel" src="v5_library.jsx"></script>
+<script type="text/babel" src="v6_trend.jsx"></script>
+
+<script type="text/babel" data-presets="react">
+const VARIANTS = {
+  cockpit:    { Comp: () => <VariantCockpit />,    label: '콕핏' },
+  timeline:   { Comp: () => <VariantTimeline />,   label: '타임라인' },
+  scenestrip: { Comp: () => <VariantSceneStrip />, label: '씬 스트립' },
+  wallmode:   { Comp: () => <VariantWallMode />,   label: '벽걸이' },
+  library:    { Comp: () => <VariantLibrary />,    label: '라이브러리' },
+  trend:      { Comp: () => <VariantTrend />,      label: '트렌드' },
+};
+const ORDER = ['cockpit','timeline','scenestrip','wallmode','library','trend'];
+
+function App() {
+  const [v, setV] = React.useState(() => localStorage.getItem('rdj-variant') || 'cockpit');
+  const [all, setAll] = React.useState(false);
+
+  React.useEffect(() => {
+    localStorage.setItem('rdj-variant', v);
+    document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.v === v));
+  }, [v]);
+
+  React.useEffect(() => {
+    const onKey = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+      if (e.key === 'ArrowRight') setV(ORDER[(ORDER.indexOf(v) + 1) % ORDER.length]);
+      else if (e.key === 'ArrowLeft') setV(ORDER[(ORDER.indexOf(v) - 1 + ORDER.length) % ORDER.length]);
+      else if (/^[1-6]$/.test(e.key)) setV(ORDER[+e.key - 1]);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [v]);
+
+  React.useEffect(() => {
+    document.querySelectorAll('.tab').forEach(b => {
+      b.onclick = () => setV(b.dataset.v);
+    });
+    document.getElementById('tweaks-toggle').onclick = () => {
+      document.getElementById('tweaks-panel').classList.toggle('open');
+    };
+    document.getElementById('tw-fidelity').onchange = (e) => {
+      document.body.classList.remove('fidelity-sketch','fidelity-mid');
+      document.body.classList.add('fidelity-' + e.target.value);
+    };
+    document.getElementById('tw-lang').onchange = (e) => {
+      document.body.classList.remove('lang-ko','lang-ja');
+      document.body.classList.add('lang-' + e.target.value);
+    };
+    document.getElementById('tw-density').onchange = (e) => {
+      document.body.classList.remove('density-cozy','density-compact');
+      document.body.classList.add('density-' + e.target.value);
+    };
+    document.getElementById('tw-all').onchange = (e) => setAll(e.target.checked);
+  }, []);
+
+  if (all) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 32, padding: '20px 0' }}>
+        {ORDER.map(k => {
+          const { Comp } = VARIANTS[k];
+          return <Comp key={k} />;
+        })}
+      </div>
+    );
+  }
+
+  const { Comp } = VARIANTS[v];
+  return <div style={{ padding: '20px 0' }}><Comp /></div>;
+}
+
+function tryMount() {
+  const el = document.getElementById('root');
+  if (!el || typeof VariantCockpit === 'undefined' || typeof VariantTrend === 'undefined') {
+    setTimeout(tryMount, 40);
+    return;
+  }
+  ReactDOM.createRoot(el).render(<App />);
+}
+tryMount();
+</script>
+
+</body>
+</html>
