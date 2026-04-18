@@ -39,15 +39,21 @@ const MAX_BULLETS    = 10;
         .forEach(i => newMistakes.push(`EP${ep.id}: ${i}`));
     });
   }
-  // 우선순위 2: 01_qa_result.json — 이번 회차 Pass여도 이전 실패 흔적이 남아있을 수 있음
+  // 우선순위 2: 01_qa_result.json — Pass여도 감점 항목이 있으면 오답 적재
   else if (fs.existsSync(RESULT_PATH)) {
     const res = JSON.parse(fs.readFileSync(RESULT_PATH, 'utf-8'));
-    if (res.verdict === 'Fail' || (typeof res.score === 'number' && res.score < 85)) {
-      console.log(`📋 [Wrapup] QA 결과 파일에서 실패 사유 추출 (점수: ${res.score ?? '?'}/100)`);
+    const hasIssues = (res.episodes || []).some(ep =>
+      (ep.issues?.length > 0) || (ep.actionable_feedback?.length > 0)
+    );
+    if (hasIssues || (typeof res.score === 'number' && res.score < 100)) {
+      console.log(`📋 [Wrapup] QA 결과에서 개선 항목 추출 (점수: ${res.score ?? '?'}/100, verdict: ${res.verdict ?? '?'})`);
       (res.feedback || []).forEach(f => newMistakes.push(f));
-      (res.episodes || []).filter(e => !e.pass).forEach(ep => {
+      // Pass 에피소드도 감점 항목이 있으면 수집
+      (res.episodes || []).forEach(ep => {
         (ep.actionable_feedback || []).forEach(af => newMistakes.push(`EP${ep.id}: ${af}`));
-        (ep.issues || []).forEach(i => newMistakes.push(`EP${ep.id}: ${i}`));
+        (ep.issues || []).filter(i =>
+          !(ep.actionable_feedback || []).some(af => af.includes(i))
+        ).forEach(i => newMistakes.push(`EP${ep.id}: ${i}`));
       });
     }
   }

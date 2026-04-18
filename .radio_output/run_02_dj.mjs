@@ -10,6 +10,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { loadEnv, requireEnv } from './lib/env.mjs';
 import { generateEpId, makePaths, ensureDirs, updateStage } from './lib/paths.mjs';
+import { validateDjScript } from './lib/validate.mjs';
 
 loadEnv();
 const epId = process.env.EP_ID ?? generateEpId();
@@ -279,6 +280,7 @@ if (includeQna && djMents.qa_segment) {
 }
 
 fs.writeFileSync(P.djScript, JSON.stringify(merged, null, 2), 'utf-8');
+validateDjScript(merged);
 updateStage(epId, 'dj_script');
 
 console.log('✅ 02_dj_script.json 저장 완료');

@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { loadEnv, requireEnv } from './lib/env.mjs';
 import { generateEpId, makePaths, ensureDirs, updateStage } from './lib/paths.mjs';
+import { validateScripts } from './lib/validate.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -376,6 +377,7 @@ EP${epNum}: ${contractParts}
 const data = { episodes };
 
 fs.writeFileSync(P.scripts, JSON.stringify(data, null, 2), 'utf-8');
+validateScripts(data);
 updateStage(P, 'scripted');
 
 console.log('\n✅ 대본 생성 완료');
