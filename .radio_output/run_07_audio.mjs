@@ -351,6 +351,11 @@ async function processChunk(chunk) {
   }
 
   let result;
+  let actualSilenceSec = 0;
+
+  // 세그먼트별 실제 오디오 길이 (bytes → seconds, 128kbps MP3 기준)
+  const segDurSec = segFiles.map(f => fs.statSync(f).size / (128 * 1024 / 8));
+
   if (HAS_FFMPEG && segFiles.length > 1 && fs.existsSync(SILENCE_FILE)) {
     // 전역 silence_1.5s.mp3를 재사용해 세그먼트 사이 묵음 삽입
     try {
@@ -370,6 +375,7 @@ async function processChunk(chunk) {
       ], { stdio: 'ignore' });
 
       result = fs.readFileSync(outFile);
+      actualSilenceSec = SILENCE_SEC;
       console.log(`   🔇 silence_1.5s.mp3 × ${segFiles.length - 1}개 삽입 완료`);
     } catch (ffErr) {
       console.warn(`   ⚠️ FFmpeg concat 실패 (${ffErr.message.slice(0, 60)}) → 직접 concat 폴백`);
@@ -380,8 +386,11 @@ async function processChunk(chunk) {
     if (segFiles.length > 1) console.log('   ⚠️ FFmpeg/silence 없음 — 직접 concat');
   }
 
+  // alignment에 실제 오디오 길이 주입 (자막 오프셋 계산용)
+  alignments.forEach((a, i) => { a.duration_sec = segDurSec[i] ?? 0; });
+
   fs.rmSync(tmpDir, { recursive: true, force: true });
-  return { merged: result, alignments };
+  return { merged: result, alignments, silenceSec: actualSilenceSec };
 }
 
 // ── final_script_for_tts.txt 생성 ────────────────────────────────────────────
@@ -442,7 +451,7 @@ for (const chunk of audioChunks) {
     continue;
   }
 
-  const { merged, alignments } = await processChunk(chunk);
+  const { merged, alignments, silenceSec } = await processChunk(chunk);
   if (merged.length === 0) {
     console.log(`⏭  ${chunk.id}.mp3 스킵 (빈 결과)`);
     continue;
@@ -457,6 +466,7 @@ for (const chunk of audioChunks) {
     chunk_id: chunk.id,
     label: chunk.label,
     generated_at: new Date().toISOString(),
+    silence_sec: silenceSec ?? 0,
     segments: alignments,
   };
   fs.writeFileSync(tsPath, JSON.stringify(tsData, null, 2), 'utf-8');

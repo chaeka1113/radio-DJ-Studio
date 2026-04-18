@@ -174,6 +174,7 @@ for (const tsFile of tsFiles) {
   const segments = Array.isArray(tsData.segments) ? tsData.segments
                  : Array.isArray(tsData)           ? tsData
                  : [];
+  const silenceSec = tsData.silence_sec ?? 0;  // 세그먼트 간 묵음 (run_07에서 기록)
 
   let segSubOffset = 0;
   for (const seg of segments) {
@@ -188,7 +189,10 @@ for (const tsFile of tsFiles) {
         end:   (ends[i]   ?? 0) + capOffset + segSubOffset,
       });
     }
-    segSubOffset += ends.length > 0 ? ends[ends.length - 1] : 0;
+    // 다음 세그먼트 오프셋 = 현재 세그먼트 실제 오디오 길이 + 묵음 간격
+    // duration_sec: run_07에서 MP3 버퍼 크기로 계산한 실제 길이 (있으면 사용, 없으면 last timestamp)
+    const segDur = seg.duration_sec ?? (ends.length > 0 ? ends[ends.length - 1] : 0);
+    segSubOffset += segDur + silenceSec;
   }
 }
 

@@ -80,6 +80,10 @@ for (const [k, v] of Object.entries(T_VE)) {
 const T_TRANSITION = tmats.transitions[0];
 const T_HSL        = (tmats.hsl || [])[0];
 const T_DENOISE    = (tmats.realtime_denoises || [])[0];
+
+// 템플릿에서 가져온 모든 material의 check_flag를 0으로 초기화 (AI 트래킹 비활성화)
+const clearTracking = (obj) => { if (obj && typeof obj === 'object') { if ('check_flag' in obj) obj.check_flag = 0; } return obj; };
+[T_STICKER, ...Object.values(T_VE), T_TRANSITION, T_HSL, T_DENOISE].forEach(clearTracking);
 const HSL_PATH     = normPath(T_HSL?.path || '');
 const HSL_LUMI     = normPath(T_HSL?.lumi_hub_path || '');
 const DENOISE_PATH = normPath(T_DENOISE?.path || '');
@@ -621,7 +625,7 @@ function makeVideoMat(index) {
     crop_ratio: 'free', audio_fade: null, crop_scale: 1, extra_type_option: 0,
     stable: { stable_level: 0, matrix_path: '', time_range: { start: 0, duration: 0 } },
     matting: { flag: 0, path: '', interactiveTime: [], has_use_quick_brush: false, strokes: [], has_use_quick_eraser: false, expansion: 0, feather: 0, reverse: false, custom_matting_id: '', enable_matting_stroke: false },
-    source: 0, source_platform: 0, formula_id: '', check_flag: 62978047,
+    source: 0, source_platform: 0, formula_id: '', check_flag: 0,
     video_algorithm: { algorithms: [], time_range: { start: 0, duration: 0 }, path: '', gameplay_configs: [], ai_in_painting_config: [], complement_frame_config: null, motion_blur_config: null, deflicker: null, noise_reduction: null, quality_enhance: null, super_resolution: null, ai_background_configs: [], smart_complement_frame: null, aigc_generate: null, aigc_generate_list: [], mouth_shape_driver: null, ai_expression_driven: null, ai_motion_driven: null, image_interpretation: null, story_video_modify_video_config: null, sr_enabled: false },
   };
 }
@@ -813,7 +817,7 @@ timelineBlocks.forEach((block, ti) => {
   const { chunk } = block;
   const filePath  = normPath(chunk.mp3Path);
   const mat = {
-    id: newUUID(), unique_id: '', type: 'extract_music',
+    id: newUUID(), unique_id: '', type: 'music',
     name: path.basename(chunk.mp3Path), duration: chunk.durUs,
     path: filePath, category_name: '', wave_points: [], music_id: '',
     app_id: 1775, text_id: '', tone_type: '', source_platform: 0,

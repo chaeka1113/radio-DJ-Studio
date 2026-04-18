@@ -591,6 +591,13 @@ app.post('/api/generate-capcut', (req, res) => {
   runScript(sse, 'run_06_capcut_builder.mjs').then(code => sse.done(code));
 });
 
+// ─── YouTube 에셋 생성 ────────────────────────────────────────────────────────
+
+app.post('/api/generate-youtube', (req, res) => {
+  const sse = sseStream(res);
+  runScript(sse, 'run_09_youtube.mjs').then(code => sse.done(code));
+});
+
 // ─── Start ───────────────────────────────────────────────────────────────────
 
 app.listen(3000, () => {

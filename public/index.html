@@ -703,6 +703,7 @@ body {
         <button class="sk-btn tiny" onclick="runStep('capcut')">🎞 CapCut</button>
         <button class="sk-btn tiny" onclick="openOutputFolder()">📁 폴더</button>
         <button class="sk-btn tiny" onclick="runStep('srt')">💬 SRT</button>
+        <button class="sk-btn tiny" onclick="runStep('youtube')" style="border-color:#f5a623;color:#f5a623;">🎬 YouTube</button>
       </div>
 
       <div id="ep-bar">
@@ -748,10 +749,17 @@ function setTab(tab) {
   document.querySelectorAll('.ed-tab').forEach(b => b.classList.remove('active'));
   const active = document.getElementById(`tab-${tab}`);
   if (active) active.classList.add('active');
-  closeTranslation();
   if (tab === 'scripts') renderScriptsToEditor();
   else if (tab === 'dj') renderDjToEditor();
   else if (tab === 'audio') renderAudioToEditor();
+  const panel = document.getElementById('translate-panel');
+  const result = document.getElementById('translate-result');
+  if (translateCache[tab]) {
+    panel.style.display = 'block';
+    result.textContent = translateCache[tab];
+  } else {
+    panel.style.display = 'none';
+  }
 }
 
 // ─── Data Rendering ────────────────────────────────────────────────────────────
@@ -829,12 +837,20 @@ async function saveText() {
 }
 
 // ─── Translation ───────────────────────────────────────────────────────────────
+const translateCache = {};  // tab → translated text
+
 async function translateText() {
   const text = document.getElementById('editor').value;
   if (!text || text.startsWith('(데이터 없음')) return;
   const panel = document.getElementById('translate-panel');
   const result = document.getElementById('translate-result');
   panel.style.display = 'block';
+
+  if (translateCache[currentTab]) {
+    result.textContent = translateCache[currentTab];
+    return;
+  }
+
   result.textContent = '번역 중 ⏳…';
   try {
     const resp = await fetch('/api/translate', {
@@ -844,6 +860,7 @@ async function translateText() {
     });
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
+    translateCache[currentTab] = data.translated;
     result.textContent = data.translated;
   } catch (err) {
     result.textContent = `❌ 번역 실패: ${err.message}`;
@@ -926,8 +943,9 @@ async function runStep(step, force = false) {
     '04':     ['/api/generate-storyboard', () => ({})],
     '05':     ['/api/generate-images', () => ({ force })],
     '07':     ['/api/generate-audio-script', () => ({})],
-    'capcut': ['/api/generate-capcut', () => ({})],
-    'srt':    ['/api/generate-srt', () => ({})],
+    'capcut':   ['/api/generate-capcut', () => ({})],
+    'srt':      ['/api/generate-srt', () => ({})],
+    'youtube':  ['/api/generate-youtube', () => ({})],
   };
   const [url, getBody] = endpoints[step] || [];
   if (!url) return;
@@ -939,6 +957,7 @@ async function runStep(step, force = false) {
   if (step === '04') { await loadStoryboard(); setDot('04','ok'); }
   if (step === '05') { await loadGallery(); setDot('05','ok'); }
   if (step === '07') { await loadAudio(); setDot('07','ok'); setTab('audio'); }
+  if (step === 'youtube') { showToast('🎬 YouTube 에셋 생성 완료! youtube/ 폴더를 확인하세요.'); }
 }
 
 function streamStep(url, body) {
