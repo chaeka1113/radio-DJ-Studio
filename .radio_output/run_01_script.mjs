@@ -211,11 +211,22 @@ for (let epIdx = 0; epIdx < 3; epIdx++) {
 
   // 이 에피소드의 contract 제약
   const kws   = (cEp.required_keywords || []).join('、');
-  const vHint = cEp.villain_required === true
-    ? '빌런(is_villain=true) 캐릭터 필수'
-    : cEp.villain_required === false
-      ? '빌런 없이 평범한 주인공(is_villain=false)'
-      : '';
+  let vHint = '';
+  if (cEp.villain_required === true) {
+    const archetype = cEp.villain_archetype ?? '自業自得型';
+    const archetypeDesc = cEp.villain_archetype_desc ?? '본인이 초래한 상황인데 억울해하며 투고하는 유형';
+    const ironyReveal = cEp.narrative_arc?.irony_reveal ?? null;
+    vHint = `🔴 빌런 사연 (is_villain=true 필수) — 아키타입: 【${archetype}】
+정의: ${archetypeDesc}
+핵심 원칙:
+- 사연자는 자신이 억울한 피해자라고 믿으며 투고한다 (본인 자각 없음)
+- 사연을 읽는 청취자는 사연 속 디테일에서 사연자가 문제임을 알아챈다
+- 명백한 나쁜 짓이 아닌, 자각 없이 주변을 힘들게 하는 구조로 써라
+- 사연자의 말투는 억울하고 진지해야 하며, DJ나 청취자의 시선에서 아이러니가 발생해야 한다${ironyReveal ? `
+반전 장치 (이 장면·사실에서 아이러니가 드러나야 함): ${ironyReveal}` : ''}`;
+  } else if (cEp.villain_required === false) {
+    vHint = '🟢 평범한 사연자(is_villain=false) — 사연자는 선량한 주인공';
+  }
   const tone  = cEp.required_emotion_tone ? `감정 톤 「${cEp.required_emotion_tone}」` : '';
   const contractParts = [kws ? `키워드 최소 1개: [${kws}]` : '', vHint, tone].filter(Boolean).join(' / ');
 
@@ -285,7 +296,7 @@ EP${epNum}: ${contractParts}
     "personality_desc": "성격 한줄 묘사 (일본어)",
     "setting": "舞台・時代背景",
     "is_villain": true,
-    "flaw_trigger": "진상 행동 요약 (빌런이면 필수, 평범이면 null)"
+    "flaw_trigger": "사연자 본인의 가해 행동 요약 (is_villain=true이면 필수, false이면 null) — 타인이 빌런인 경우가 아님"
   }
 }`;
 

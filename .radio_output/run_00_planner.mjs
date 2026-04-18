@@ -50,7 +50,7 @@ if (includeMz) console.log(`🔥 MZ 모드 ON — EP${mzEpNum}를 10~30대 사�
 const VILLAIN_PROB = 0.3;
 const villainOccurs = Math.random() < VILLAIN_PROB;
 const villainEpNum = villainOccurs ? Math.floor(Math.random() * 3) + 1 : null;
-if (villainOccurs) console.log(`🔴 빌런 발생 — EP${villainEpNum}에 빌런 캐릭터 배정`);
+if (villainOccurs) console.log(`🔴 빌런 발생 — EP${villainEpNum}에 사연자 본인이 빌런(가해자) 배정`);
 else console.log(`🟢 이번 방송 빌런 없음 (전원 평범 사연자)`);
 
 // MZ와 빌런 EP 충돌 방지: 같은 EP라면 빌런 EP를 재추첨
@@ -64,6 +64,29 @@ if (villainOccurs && mzEpNum !== null && villainEpNum === mzEpNum) {
 // 에피소드별 villain_required 맵 (LLM에게 주입할 사전 결정값)
 const villainMap = { 1: false, 2: false, 3: false };
 if (villainOccurs) villainMap[finalVillainEpNum] = true;
+
+// 빌런 아키타입 랜덤 선택 (villain_required=true 에피소드에만 적용)
+const VILLAIN_ARCHETYPES = [
+  {
+    id: '自業自得型',
+    desc: '본인이 초래한 상황인데 억울해하며 투고하는 유형. 사연을 읽다 보면 결국 자기가 씨를 뿌렸음이 드러난다.',
+    example: '아들이 연락을 끊었다고 억울해하지만, 사연 속 과거 행동을 보면 본인이 평생 아들을 무시·억압해온 게 드러남',
+  },
+  {
+    id: '善意の迷惑型',
+    desc: '좋은 의도라고 믿지만 주변에 민폐를 끼치는 유형. 왜 가족/동료가 싫어하는지 전혀 모른다.',
+    example: '가족을 걱정해서 한 일이라고 쓰지만, 읽다 보면 과잉간섭·통제 행동이 드러나 주변이 지쳐 떠난 상황',
+  },
+  {
+    id: 'お門違い型',
+    desc: '화살표 방향이 완전히 반대인 유형. 자신이 피해자라 확신하지만 객관적으로 보면 본인이 가해자.',
+    example: '직장 동료가 왕따시킨다고 쓰지만, 사연 속 디테일을 보면 본인의 言動이 직장 분위기를 망쳐왔음이 드러남',
+  },
+];
+const villainArchetype = villainOccurs
+  ? VILLAIN_ARCHETYPES[Math.floor(Math.random() * VILLAIN_ARCHETYPES.length)]
+  : null;
+if (villainArchetype) console.log(`   아키타입: ${villainArchetype.id} — ${villainArchetype.desc.slice(0, 30)}...`);
 
 const client = new Anthropic({ apiKey: API_KEY });
 
@@ -87,11 +110,24 @@ Q&A 모드: ${includeQna ? 'ON' : 'OFF'}
 3. required_emotion_tone: 該 테마에 어울리는 감정 톤 (苦笑い|哀愁|懐かしさ|ほっこり|驚き 중 1개)
 4. forbidden_drift: 이 테마에서 절대 빠지면 안 되는 주제 이탈 패턴 예시 1~2개
 5. villain_required: 위 "빌런 배정" 값을 그대로 사용할 것. LLM이 임의로 변경하지 말 것.
+   villain_required=true인 에피소드는 아래 아키타입과 irony_reveal을 반드시 설계할 것:
+   ${villainArchetype ? `
+   ⚠️ 이번 빌런 아키타입: 【${villainArchetype.id}】
+   정의: ${villainArchetype.desc}
+   예시 참고: ${villainArchetype.example}
+
+   핵심 원칙:
+   - 사연자는 본인이 억울한 피해자라고 믿으며 투고한다 (본인 자각 없음)
+   - 하지만 사연 속 디테일(말투·행동·과거)을 읽으면 청취자는 사연자가 문제임을 알아챈다
+   - 사연자가 명백한 나쁜 짓을 하는 게 아니라, 자각 없이 주변을 힘들게 하는 구조
+   - narrative_arc는 이 아키타입에 맞게 설계할 것` : ''}
 6. narrative_arc: 사연의 起承転結 4단계 스케치 (각 50字 이내 일본어)
    - setup: 주인공과 배경 상황
    - incident: 이야기의 발단·사건
    - turn: 감정의 전환점 또는 갈등 고조
    - resolution: 결말 또는 투고 동기
+   villain_required=true인 경우 추가 필드:
+   - irony_reveal: 사연자가 억울하다 쓰지만, 어떤 구체적 사실·행동·대사에서 청취자가 "아, 이 사람이 문제구나"를 깨닫게 되는 반전 장면 (60字 이내 일본어)
 7. tenki_jii_hooks: テンキ爺가 끼어들 장면 힌트 2개 (독설/공감/설 치는 타이밍)
    - 각 항목은 「장면 설명 → テンキ爺 반응 유형」형식
    - 예: "息子に「自業自得」と言われる → 独説타이밍"
@@ -117,12 +153,14 @@ Q&A 모드: ${includeQna ? 'ON' : 'OFF'}
       "required_emotion_tone": "苦笑い",
       "forbidden_drift": ["이탈 패턴 예시1"],
       "villain_required": false,
+      "villain_archetype": null,
       "script_length_range": "800〜1000文字",
       "narrative_arc": {
         "setup": "주인공과 상황 설정 (50字 이내 일본어)",
         "incident": "발단이 되는 사건 (50字 이내 일본어)",
         "turn": "감정 전환점 또는 갈등 (50字 이내 일본어)",
-        "resolution": "결말 또는 투고 동기 (50字 이내 일본어)"
+        "resolution": "결말 또는 투고 동기 (50字 이내 일본어)",
+        "irony_reveal": null
       },
       "tenki_jii_hooks": [
         "장면 → テンキ爺 반응 유형 (예: 독설/공감/침묵후 설치기)",
@@ -150,11 +188,23 @@ while (retryCount < 3) {
     if (!jsonMatch) throw new Error('JSON 파싱 실패');
     contract = JSON.parse(jsonMatch[0]);
     if (!contract.episodes || contract.episodes.length < 3) throw new Error('에피소드 3개 필요');
-    // villain_required·villain_episode_id 강제 적용 (LLM 임의 변경 무시)
+    // villain_required·villain_archetype 강제 적용 (LLM 임의 변경 무시)
     contract.villain_occurs = villainOccurs;
     contract.villain_episode_id = finalVillainEpNum ?? null;
     contract.episodes.forEach(ep => {
       ep.villain_required = villainMap[ep.id] ?? false;
+      if (ep.villain_required && villainArchetype) {
+        ep.villain_archetype = villainArchetype.id;
+        ep.villain_archetype_desc = villainArchetype.desc;
+        // irony_reveal은 LLM이 설계한 값 유지 (없으면 기본값)
+        if (!ep.narrative_arc) ep.narrative_arc = {};
+        if (!ep.narrative_arc.irony_reveal) {
+          ep.narrative_arc.irony_reveal = `${villainArchetype.example} (플래너가 구체화할 것)`;
+        }
+      } else {
+        ep.villain_archetype = null;
+        if (ep.narrative_arc) ep.narrative_arc.irony_reveal = null;
+      }
     });
     break;
   } catch (err) {

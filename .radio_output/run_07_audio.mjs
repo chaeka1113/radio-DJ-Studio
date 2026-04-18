@@ -101,7 +101,9 @@ function cleanForTTS(text) {
   // 4. SSML 태그 제거 — V3 미지원
   text = text.replace(/<[^>]+>/g, '');
   // 5. 영문 Audio Tag([sighs],[laughs] 등)는 그대로 통과 — V3 native 지원
-  // 6. 공백 정리
+  // 6. 한국어(가-힣) 완전 제거 — TTS는 일본어 전용
+  text = text.replace(/[가-힣]+/g, '');
+  // 7. 공백 정리
   return text.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 }
 
