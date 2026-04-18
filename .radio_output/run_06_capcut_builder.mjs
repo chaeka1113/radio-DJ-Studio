@@ -1146,6 +1146,9 @@ fs.writeFileSync(OUTPUT_PATH, JSON.stringify(newDraft, null, 2), 'utf-8');
     'utf-8'
   );
 
+  // run_08_srt.mjs가 동기화할 수 있도록 경로 저장
+  fs.writeFileSync(path.join(P.base, 'capcut_project_dir.txt'), normPath(targetDir), 'utf-8');
+
   console.log(`\n🚀 CapCut 드래프트 배송 완료`);
   console.log(`   폴더: ${normPath(targetDir)}`);
   console.log(`   UUID: ${rootUUID}`);

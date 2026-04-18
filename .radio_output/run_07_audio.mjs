@@ -137,7 +137,7 @@ function autoInjectDJTags(text) {
 }
 
 // ── DJ 요청 ID 추적 (previous_request_ids용) ──────────────────────────────────
-const djRequestIds = []; // 최근 3개까지 보관
+const djRequestIds = []; // 최근 3개까지 보관 (현재 미사용 — 보이스 호환성 이슈로 비활성화)
 
 // ── ElevenLabs API 단일 호출 ──────────────────────────────────────────────────
 function callElevenLabsOnce(cleaned, voiceId, voiceSettings, prevRequestIds = []) {
@@ -195,7 +195,7 @@ async function callElevenLabs(text, voiceId, voiceSettings, isDJ = false) {
   if (isDJ) processedText = autoInjectDJTags(processedText);
   if (!processedText.trim()) return { audioBuffer: Buffer.alloc(0), alignment: null };
 
-  const prevIds = isDJ ? [...djRequestIds] : [];
+  const prevIds = []; // previous_request_ids 비활성화 — eleven_v3 보이스 호환성 문제
   const MAX_RETRY = 2;
   const RETRY_DELAY = [3000, 6000];
 
@@ -203,10 +203,7 @@ async function callElevenLabs(text, voiceId, voiceSettings, isDJ = false) {
     try {
       const result = await callElevenLabsOnce(processedText, voiceId, voiceSettings, prevIds);
       // DJ 요청 ID 수집 (최근 3개 유지)
-      if (isDJ && result.requestId) {
-        djRequestIds.push(result.requestId);
-        if (djRequestIds.length > 3) djRequestIds.shift();
-      }
+      // request-id 수집 비활성화 (보이스 호환성 이슈)
       return result;
     } catch (err) {
       if (attempt < MAX_RETRY) {

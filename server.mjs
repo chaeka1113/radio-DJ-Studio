@@ -358,6 +358,14 @@ app.post('/api/generate-audio-script', async (req, res) => {
   }
   sse.log('✅ [CapCut] 완료 — capcut/ 에 draft_content.json 저장됨');
 
+  sse.log('📝 [SRT] 자막 파일 생성 중...');
+  const srtCode = await runScript(sse, 'run_08_srt.mjs');
+  if (srtCode !== 0) {
+    sse.log('⚠️ [SRT] 자막 생성 실패 — 파이프라인은 완료');
+  } else {
+    sse.log('✅ [SRT] subtitles.srt 저장 완료');
+  }
+
   sse.done(0);
 });
 
@@ -528,6 +536,16 @@ app.post('/api/translate', async (req, res) => {
 
 app.get('/api/current-ep', (req, res) => {
   res.json({ ep_id: currentEpId });
+});
+
+app.post('/api/resume-ep', (req, res) => {
+  const { ep_id } = req.body;
+  if (!ep_id) return res.status(400).json({ error: 'ep_id 필요' });
+  const P = makePaths(ep_id);
+  if (!fs.existsSync(P.base)) return res.status(404).json({ error: `EP 없음: ${ep_id}` });
+  currentEpId = ep_id;
+  console.log(`🔄 EP 복구: ${currentEpId}`);
+  res.json({ success: true, ep_id: currentEpId });
 });
 
 app.get('/api/data/scripts', (req, res) => {

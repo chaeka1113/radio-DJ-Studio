@@ -11,7 +11,7 @@ import Anthropic from '@anthropic-ai/sdk';
 loadEnv();
 
 function run(cmd, opts = {}) {
-  return execSync(cmd, { encoding: 'utf-8', ...opts }).trim();
+  return execSync(cmd, { encoding: 'utf-8', maxBuffer: 50 * 1024 * 1024, ...opts }).trim();
 }
 
 // ── 변경사항 확인 ──────────────────────────────────────────────
