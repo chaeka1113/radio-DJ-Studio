@@ -55,3 +55,5 @@ audio/
 images/
 videos/
 final_script_for_tts.txt
+# Claude Code worktrees
+.claude/worktrees/
