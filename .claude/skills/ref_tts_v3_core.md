@@ -26,10 +26,17 @@ type: reference
 だと？... [scoffs] ...そんな話があるか
 ```
 
-## 규칙 3: script 필드(사연자 편지)에 Audio Tag 금지
+## 규칙 3: script 필드(사연자 편지) Audio Tag 허용 범위
 
-`[sighs]` 등 영문 Audio Tag는 **DJ 멘트 필드에서만 허용**.
-사연자 편지(script 필드)에는 `...` 줄임표만 사용.
+사연자 편지(script 필드)에도 영문 Audio Tag 사용 가능. 단 아래 제한 준수:
+
+| 구분 | 허용 태그 |
+|------|-----------|
+| 감정 | `[sighs]` `[laughs]` `[chuckles]` `[sad]` `[nervous]` `[excited]` `[surprised]` `[whispers]` |
+| 빌런 한정 | `[angry]` `[scoffs]` (is_villain=true 캐릭터만) |
+| 금지 | 효과음 계열 (`[applause]` `[gunshot]` 등), 일본어 태그, SSML |
+
+**사용 기준**: 800〜1,000字 당 1〜3개. 감정 절정 순간에만 삽입. 연속 사용 금지.
 
 ## 규칙 4: 완전 금지 항목
 
@@ -48,8 +55,29 @@ type: reference
 [inhales sharply] [exhales slowly]
 ```
 
+## 규칙 6: API 요청 강화 (v3 고급 기능)
+
+- `language_code: "ja"` — 모든 요청에 포함 (일본어 발음·억양 정확도 향상)
+- `previous_request_ids` — DJ(テンキ爺) 목소리만 해당. 직전 최대 3개 요청 ID를 넘겨 방송 내 목소리 일관성 유지. 사연자 목소리는 적용 안 함.
+
+## 규칙 7: DJ 텍스트 Audio Tag 자동 보강
+
+DJ 텍스트에 Audio Tag가 2개 이하일 때 `autoInjectDJTags()`가 패턴 기반으로 자동 삽입:
+
+| 감정 패턴 | 삽입 태그 |
+|---|---|
+| `まったく` `ふん` `フン` | `[scoffs]` |
+| `はぁ` `ふぅ` `やれやれ` | `[sighs]` |
+| `（笑）` | `[laughs]` |
+| `（苦笑）` | `[chuckles]` |
+| `！！` | `[excited]` |
+| `なんと` | `[surprised]` |
+| `ほほう` `？？` | `[curious]` |
+
 ## 전달 전 체크리스트
 
 - [ ] 모든 `[태그]` 앞뒤에 공백이 있는가?
 - [ ] 일본어 문자 또는 구두점에 태그가 직접 붙어 있지 않은가?
 - [ ] script 필드(사연자 편지)에 Audio Tag가 없는가?
+- [ ] `language_code: "ja"` 포함되었는가?
+- [ ] DJ 호출 시 `previous_request_ids` 전달되었는가?

@@ -39,18 +39,24 @@ ElevenLabs V3 TTS 호환성을 위한 **절대 금지 목록**. 하나라도 위
 | SSML 태그 | `<break time="1s"/>` | 완전 삭제 |
 | 노이즈 의성어 | `ジジジ` `ガガッ` `ブーン` `ギギギ` `ザザッ` | 완전 삭제 |
 
-### 허용 지문 — 영문 Audio Tag만
+### 허용 지문 — 영문 Audio Tag
 
+**DJ 멘트 필드** (제한 없음):
 ```
-감정/상태: [sighs] [laughs] [chuckles] [angry] [whispers]
-           [surprised] [sad] [excited] [nervous] [scoffs]
-연출:      [clears throat] [inhales sharply] [exhales slowly]
+[sighs] [laughs] [chuckles] [angry] [whispers] [surprised]
+[sad] [excited] [nervous] [scoffs] [clears throat]
+[inhales sharply] [exhales slowly]
 ```
 
-**⚠️ 주의:** `[sighs]` 등 영문 태그도 **script 필드(사연자 편지)에는 사용 금지**.
-영문 Audio Tag는 DJ 멘트(02_dj_script)에서만 허용. 사연자 편지에는 `...`만 허용.
+**script 필드 (사연자 편지)** — 제한적 허용:
+```
+기본: [sighs] [laughs] [chuckles] [sad] [nervous] [excited] [surprised] [whispers]
+빌런 한정: [angry] [scoffs]
+금지: 효과음 계열([applause] 등), 일본어 태그, SSML
+```
+사용 기준: 800〜1,000字 당 1〜3개, 감정 절정에만, 연속 사용 금지.
 
-**만점 조건:** 일본어 태그·괄호·의성어 전혀 없음. script 필드에 영문 태그도 없음.
+**만점 조건:** 일본어 태그·괄호·의성어 전혀 없음. script 필드 Audio Tag는 허용 범위 내 적절히 사용.
 
 ---
 

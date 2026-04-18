@@ -105,14 +105,52 @@ function cleanForTTS(text) {
   return text.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+// ── DJ Audio Tag 자동 보강 ────────────────────────────────────────────────────
+// DJ 텍스트에 Audio Tag가 부족할 때 감정 패턴으로 자동 삽입
+function autoInjectDJTags(text) {
+  if (!text) return text;
+  const existingTags = (text.match(/\[[a-z ]+\]/g) || []).length;
+  if (existingTags >= 3) return text; // 이미 충분
+
+  // 패턴별 태그 삽입 (앞뒤 공백 포함)
+  const rules = [
+    [/まったく(?!\s*\[)/g,          '[scoffs] まったく'],
+    [/ふん(?=[、。！　 ]|$)/g,        '[scoffs] ふん'],
+    [/フン(?=[、。！　 ]|$)/g,        '[scoffs] フン'],
+    [/はぁ(?=[、。　 ]|$)/g,          '[sighs] はぁ'],
+    [/ふぅ(?=[、。　 ]|$)/g,          '[sighs] ふぅ'],
+    [/やれやれ(?!\s*\[)/g,           '[sighs] やれやれ'],
+    [/（笑）/g,                       ' [laughs] '],
+    [/（苦笑）/g,                     ' [chuckles] '],
+    [/！！(?!\s*\[)/g,               '！！ [excited]'],
+    [/\?{2,}(?!\s*\[)/g,            '？？ [curious]'],
+    [/ほほう(?!\s*\[)/g,             '[curious] ほほう'],
+    [/なんと(?!\s*\[)/g,             '[surprised] なんと'],
+    [/ぼそっと/g,                     ' [whispers] '],
+  ];
+
+  for (const [pattern, replacement] of rules) {
+    text = text.replace(pattern, replacement);
+  }
+  // 공백 정리
+  return text.replace(/[ \t]{2,}/g, ' ').trim();
+}
+
+// ── DJ 요청 ID 추적 (previous_request_ids용) ──────────────────────────────────
+const djRequestIds = []; // 최근 3개까지 보관
+
 // ── ElevenLabs API 단일 호출 ──────────────────────────────────────────────────
-function callElevenLabsOnce(cleaned, voiceId, voiceSettings) {
+function callElevenLabsOnce(cleaned, voiceId, voiceSettings, prevRequestIds = []) {
   const settings = voiceSettings || { stability: 0.5, similarity_boost: 0.75 };
-  const body = JSON.stringify({
+  const payload = {
     text: cleaned,
     model_id: 'eleven_v3',
     voice_settings: settings,
-  });
+    language_code: 'ja',
+  };
+  if (prevRequestIds.length > 0) payload.previous_request_ids = prevRequestIds;
+
+  const body = JSON.stringify(payload);
 
   return new Promise((resolve, reject) => {
     const options = {
@@ -127,6 +165,7 @@ function callElevenLabsOnce(cleaned, voiceId, voiceSettings) {
     };
     const req = https.request(options, (res) => {
       const chunks = [];
+      const requestId = res.headers['request-id'] || null;
       res.on('data', c => chunks.push(c));
       res.on('end', () => {
         if (res.statusCode !== 200) {
@@ -136,7 +175,7 @@ function callElevenLabsOnce(cleaned, voiceId, voiceSettings) {
         try {
           const json = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
           const audioBuffer = Buffer.from(json.audio_base64, 'base64');
-          resolve({ audioBuffer, alignment: json.alignment || null });
+          resolve({ audioBuffer, alignment: json.alignment || null, requestId });
         } catch (parseErr) {
           reject(new Error(`JSON parse error: ${parseErr.message}`));
         }
@@ -149,29 +188,38 @@ function callElevenLabsOnce(cleaned, voiceId, voiceSettings) {
 }
 
 // ── ElevenLabs API 호출 (재시도 포함) ─────────────────────────────────────────
+// isDJ: true면 previous_request_ids 주입 + 응답 ID 수집
 // 반환: { audioBuffer: Buffer, alignment: object|null }
-async function callElevenLabs(text, voiceId, voiceSettings) {
-  const cleaned = cleanForTTS(text);
-  if (!cleaned.trim()) return { audioBuffer: Buffer.alloc(0), alignment: null };
+async function callElevenLabs(text, voiceId, voiceSettings, isDJ = false) {
+  let processedText = cleanForTTS(text);
+  if (isDJ) processedText = autoInjectDJTags(processedText);
+  if (!processedText.trim()) return { audioBuffer: Buffer.alloc(0), alignment: null };
 
+  const prevIds = isDJ ? [...djRequestIds] : [];
   const MAX_RETRY = 2;
   const RETRY_DELAY = [3000, 6000];
 
   for (let attempt = 0; attempt <= MAX_RETRY; attempt++) {
     try {
-      return await callElevenLabsOnce(cleaned, voiceId, voiceSettings);
+      const result = await callElevenLabsOnce(processedText, voiceId, voiceSettings, prevIds);
+      // DJ 요청 ID 수집 (최근 3개 유지)
+      if (isDJ && result.requestId) {
+        djRequestIds.push(result.requestId);
+        if (djRequestIds.length > 3) djRequestIds.shift();
+      }
+      return result;
     } catch (err) {
       if (attempt < MAX_RETRY) {
         const wait = RETRY_DELAY[attempt];
         process.stdout.write(`\n   ⏳ 재시도 ${attempt + 1}/${MAX_RETRY} (${wait / 1000}초 후)... `);
         await new Promise(r => setTimeout(r, wait));
       } else {
-        // 최종 실패 — 클리닝 강화 후 한 번 더
-        const reClean = cleaned.replace(/\[[^\]]+\]/g, '').replace(/\s+/g, ' ').trim();
-        if (reClean !== cleaned && reClean.length > 0) {
+        // 최종 실패 — 태그 제거 후 한 번 더
+        const reClean = processedText.replace(/\[[^\]]+\]/g, '').replace(/\s+/g, ' ').trim();
+        if (reClean !== processedText && reClean.length > 0) {
           process.stdout.write(`\n   🔄 클리닝 강화 후 최종 시도... `);
           try {
-            return await callElevenLabsOnce(reClean, voiceId, voiceSettings);
+            return await callElevenLabsOnce(reClean, voiceId, voiceSettings, prevIds);
           } catch (finalErr) {
             throw finalErr;
           }
@@ -285,7 +333,7 @@ async function processChunk(chunk) {
     process.stdout.write(`   [${item.label}] 생성 중... `);
     const voiceSettings = item.isDJ ? DJ_VOICE_SETTINGS : CALLER_VOICE_SETTINGS;
     try {
-      const { audioBuffer, alignment } = await callElevenLabs(item.text, item.voiceId, voiceSettings);
+      const { audioBuffer, alignment } = await callElevenLabs(item.text, item.voiceId, voiceSettings, item.isDJ);
       if (audioBuffer.length === 0) { process.stdout.write(`⏭ (빈 버퍼 스킵)\n`); continue; }
       const segFile = path.join(tmpDir, `seg_${segFiles.length}_${item.label.replace(/\s+/g, '_')}.mp3`);
       fs.writeFileSync(segFile, audioBuffer);

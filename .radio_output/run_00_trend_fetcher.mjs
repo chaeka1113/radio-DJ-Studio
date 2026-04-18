@@ -106,13 +106,13 @@ const client = new Anthropic({ apiKey: API_KEY });
 
 const selectionPrompt = `당신은 일본 시니어 라디오 "テンキ爺の電波局"의 콘텐츠 큐레이터입니다.
 아래 일본어 뉴스 헤드라인 ${uniqueTitles.length}건에서
-50대 이상 청취자가 공감하거나 관심 가질 방송 주제 3개를 선별하고
-라디오 사연 테마로 쓸 수 있는 간결한 일본어 키워드로 정제해 주세요.
+라디오 사연 테마로 쓸 수 있는 간결한 일본어 키워드 5개를 선별해 주세요.
+시니어(50대+) 적합 주제 4개 + MZ세대(10~30대) 적합 주제 1개를 포함할 것.
 
 【선별 기준 — 반드시 준수】
-① 50대 이상 일상과 직결 (건강, 가족, 노후, 직장, 관계, 취미)
-② 정치성 낮고 따뜻하거나 유머러스하게 풀 수 있는 주제
-③ 3개 주제는 서로 다른 카테고리에서 고를 것 (동일 카테고리 중복 금지)
+① 시니어 주제: 50대 이상 일상과 직결 (건강, 가족, 노후, 직장, 관계, 취미)
+② MZ 주제: 10~30대 공감 (연애, SNS, 취업, 학교, 청년문화, 디지털)
+③ 5개 주제는 모두 서로 다른 카테고리 (동일 카테고리 중복 금지)
 ④ 사연 형식으로 자연스럽게 쓸 수 있는 주제
 ⑤ 뉴스 헤드라인을 그대로 쓰지 말고 라디오 테마로 추상화할 것
    (예: "高齢者の交通事故増加" → "免許返納")
@@ -123,9 +123,9 @@ ${uniqueTitles.map((t, i) => `${i + 1}. ${t}`).join('\n')}
 
 【출력 JSON만 반환, 설명 일절 없음】
 {
-  "topics": ["テーマ1（10文字以内の日本語）", "テーマ2", "テーマ3"],
-  "rationale": ["선정 이유1 (한국어 한 줄)", "이유2", "이유3"],
-  "source_headlines": ["원본 헤드라인1", "원본 헤드라인2", "원본 헤드라인3"]
+  "topics": ["シニアテーマ1（10文字以内）", "シニアテーマ2", "シニアテーマ3", "シニアテーマ4", "MZテーマ1"],
+  "rationale": ["이유1", "이유2", "이유3", "이유4", "이유5(MZ)"],
+  "source_headlines": ["원본1", "원본2", "원본3", "원본4", "원본5"]
 }`;
 
 console.log('🤖 [Trend Fetcher] Claude로 주제 선별 중...');
@@ -143,7 +143,7 @@ while (retries < 3) {
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('JSON 파싱 실패');
     const parsed = JSON.parse(jsonMatch[0]);
-    if (!Array.isArray(parsed.topics) || parsed.topics.length < 3) throw new Error('주제 3개 필요');
+    if (!Array.isArray(parsed.topics) || parsed.topics.length < 5) throw new Error('주제 5개 필요');
     result = parsed;
     break;
   } catch (err) {
@@ -171,7 +171,8 @@ fs.writeFileSync(
 
 console.log('✅ [Trend Fetcher] 주제 선별 완료 → 00_trends.json');
 result.topics.forEach((t, i) => {
-  console.log(`   주제${i + 1}: ${t}`);
+  const label = i === 4 ? 'MZ주제' : `주제${i + 1}`;
+  console.log(`   ${label}: ${t}`);
   if (output.rationale[i]) console.log(`        └ ${output.rationale[i]}`);
 });
 console.log('');

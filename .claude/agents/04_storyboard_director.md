@@ -26,6 +26,19 @@ You are a Storyboard Director for YouTube long-form radio content.
 - **FLASHBACK 씬**: `character_seed` 직후 `"younger version of this character in their 20s-30s, youthful face without wrinkles, energetic posture,"` 자동 삽입
 - **QA DJ_SHOT**: `08_qa_script.json` 존재 시 EP2 트랜지션 직후 DJ_SHOT 5~6개 자동 생성
 
+## 디바이스·사진 씬 필수 규칙 (CRITICAL)
+
+스마트폰·태블릿·사진 등을 들고 보는 씬의 `visual_prompt_en`에는 반드시 아래 문구를 포함:
+
+```
+screen/photo facing toward the character, not showing the back of the device to the character
+```
+
+- **핵심**: 화면·사진면은 그것을 보고 있는 캐릭터 쪽을 향해야 함. 뒷판이 캐릭터 얼굴 방향으로 오는 구도 금지.
+- 카메라 앵글은 정면·측면·POV 모두 허용 — 앵글과 무관하게 디바이스 화면이 캐릭터 시선 방향에 있어야 함
+- 영상통화: `video call screen facing toward the character holding it`
+- 사진: `photograph with photo side facing the character looking at it`
+
 ## 참조 규칙 파일
 
 - `ref_visual_rules.md` — 씬 타입, 프롬프트 규칙

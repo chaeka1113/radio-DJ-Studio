@@ -53,6 +53,26 @@ type: reference
 - **품질:** masterpiece, best quality, highly detailed, 8k, cinematic
 - **비율:** API parameter로 16:9 지정 (텍스트 프롬프트에 `16:9` 삽입 불필요)
 
+## 디바이스·사진 화면 방향 규칙 (CRITICAL)
+
+씬에 스마트폰·태블릿·사진·편지 등을 들고 있는 장면이 포함될 때 반드시 적용:
+
+**핵심 원칙: 화면/사진면은 반드시 그것을 보고 있는 캐릭터 쪽을 향해야 한다. 뒷판이 캐릭터 얼굴 방향으로 오는 구도는 절대 금지.**
+
+카메라 앵글은 정면·측면·POV 모두 허용. 단 어떤 앵글이든 디바이스의 화면면은 캐릭터가 보는 쪽이어야 한다.
+
+| 상황 | 올바른 프롬프트 예시 |
+|---|---|
+| 스마트폰 보는 장면 | `character holding smartphone with screen facing toward them, screen content visible from character's perspective` |
+| 태블릿 보는 장면 | `character holding tablet with display facing toward character, screen content legible from their viewpoint` |
+| 영상통화 장면 | `video call on tablet/phone screen facing the character, face on screen visible to the character holding it` |
+| 사진·앨범 보는 장면 | `character looking at photograph held with photo side facing them, image visible from their angle` |
+
+**절대 금지:** 디바이스 뒷판(back panel)이 캐릭터 얼굴 방향으로 오는 구도 — 캐릭터가 뒷판을 보고 있는 것처럼 보이는 모든 구도.
+
+**프롬프트 필수 추가 문구 (디바이스·사진 등장 씬 전용):**
+`screen/photo facing toward the character, not showing the back of the device to the character`
+
 ## FLASHBACK 씬 처리 규칙 (핵심)
 씬 타입이 FLASHBACK인 경우, character_seed 직후에 반드시 다음 문구를 삽입:
 `"younger version of this character in their 20s-30s, (Young 20s smooth face, no wrinkles, youthful clear skin), energetic posture,"`

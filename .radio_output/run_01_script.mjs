@@ -162,6 +162,17 @@ ${referenceKnowledge}
 - 사건 전후의 심경 변화와 자기 반성을 충분히 서술한다
 - 편지 특유의 인사말과 마무리 문장으로 앞뒤를 감싼다
 
+🎙️ ElevenLabs V3 Audio Tag — script 필드 사용 지침
+사연자 편지(script 필드)에도 영문 Audio Tag를 삽입해 감정을 더욱 풍부하게 표현할 것.
+허용 태그: [sighs] [laughs] [chuckles] [sad] [nervous] [excited] [surprised] [whispers]
+빌런(is_villain=true) 한정 추가 허용: [angry] [scoffs]
+사용 규칙:
+- 800〜1,000字 당 1〜3개만 사용 (과다 사용 QA 감점)
+- 감정이 절정에 달하는 순간에만 삽입 (한숨, 눈물, 웃음, 놀람 등)
+- 태그 앞뒤 반드시 공백 1칸 — 예: 「もう限界です。 [sighs] それでも…」
+- 연속 2개 이상 금지 — 예: [sighs] [sad] ← 금지
+- 효과음 계열([applause] [gunshot] 등) 절대 금지
+
 ---
 
 # 🚨 QA 채점 사전 경고 — 반드시 숙지할 것

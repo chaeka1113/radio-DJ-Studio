@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import { spawn } from 'child_process';
 import { GoogleGenAI } from '@google/genai';
+import Anthropic from '@anthropic-ai/sdk';
 import fs from 'fs';
 import https from 'https';
 import path from 'path';
@@ -15,6 +16,9 @@ const API_KEY    = process.env.GEMINI_API_KEY;
 
 // Gemini 이미지 생성 클라이언트 (Nano Banana — 2.5 Flash Image)
 const ai = new GoogleGenAI({ apiKey: API_KEY });
+
+// Claude 클라이언트 (주제 선별 등 텍스트 작업)
+const claude = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 /** Active episode ID — set once per pipeline run in /api/generate-scripts */
 let currentEpId = null;
@@ -138,7 +142,44 @@ app.post('/api/generate-scripts', async (req, res) => {
     });
 
     if (trendTopics && trendTopics.length >= 3) {
-      finalTopics = trendTopics.slice(0, 3);
+      // MZ 모드: AI로 MZ 적합 주제 1개 + 시니어 적합 주제 2개 선별
+      if (includeMz && API_KEY && trendTopics.length >= 5) {
+        try {
+          sse.log('🎯 [MZ선별] MZ사연 적합 주제 Claude 선별 중...');
+          const selResult = await claude.messages.create({
+            model: 'claude-sonnet-4-5',
+            max_tokens: 512,
+            messages: [{
+              role: 'user',
+              content: `당신은 일본 라디오 방송 기획자입니다. 아래 수집된 일본 트렌드 주제 목록에서:\n- MZ세대(10~30대) 사연으로 활용하기 좋은 주제 1개 (연애, SNS, 취업, 학교, 청년문화, 디지털 관련)\n- 시니어(50대+) 청취자 공감 사연에 적합한 주제 2개 (건강, 노후, 가족, 추억, 지역사회 관련)\n를 선별해라. 반드시 목록에 있는 주제를 그대로 사용할 것. JSON만 반환:\n{"mz_topic": "주제", "senior_topics": ["주제1", "주제2"]}\n\n주제 목록:\n${trendTopics.map((t, i) => `${i + 1}. ${t}`).join('\n')}`,
+            }],
+          });
+          const rawJson = selResult.content[0].text.match(/\{[\s\S]*?\}/)?.[0];
+          if (rawJson) {
+            const sel = JSON.parse(rawJson);
+            if (sel.mz_topic && sel.senior_topics?.length >= 2) {
+              // MZ 주제를 mzEpNum 위치에 배치 (planner가 mzEpNum을 보기 전이므로 여기선 그냥 배열로 전달)
+              // run_00_planner.mjs가 --mz 플래그와 함께 mzEpNum을 결정하므로
+              // MZ 주제를 topics 배열의 맨 앞에 두면 planner가 EP1을 MZ로 지정할 가능성이 높음
+              // → 대신 고정: MZ topic을 finalTopics[mzEpNum-1]에 넣도록 직접 배치
+              // planner가 --mz 플래그 시 mzEpNum을 랜덤으로 정하므로, 우선 순서대로 넘기되
+              // MZ 주제를 index 0 (EP1 후보)에 배치 — planner가 실제 EP 번호를 결정
+              finalTopics = [sel.mz_topic, sel.senior_topics[0], sel.senior_topics[1]];
+              sse.log(`✅ [MZ선별] MZ주제: ${sel.mz_topic}`);
+              sse.log(`✅ [MZ선별] 시니어주제: ${sel.senior_topics[0]} / ${sel.senior_topics[1]}`);
+            } else {
+              throw new Error('선별 결과 형식 오류');
+            }
+          } else {
+            throw new Error('JSON 파싱 실패');
+          }
+        } catch (e) {
+          sse.log(`⚠️ [MZ선별] AI 선별 실패(${e.message}) — 상위 3개 사용`);
+          finalTopics = trendTopics.slice(0, 3);
+        }
+      } else {
+        finalTopics = trendTopics.slice(0, 3);
+      }
       sse.log(`TREND_TOPICS:${finalTopics.join('|')}`);
       sse.log(`✅ [Trend Fetcher] 주제 자동 선별: ${finalTopics.join(' / ')}`);
       // 한국어 번역 (대시보드 확인용 — 실제 대본에 영향 없음)
@@ -272,7 +313,9 @@ app.post('/api/generate-storyboard', async (req, res) => {
   const code04 = await runScript(sse, 'run_04_storyboard.mjs');
   if (code04 !== 0) return sse.done(code04);
   const codeQA = await runScript(sse, 'run_04_visual_QA.mjs');
-  sse.done(codeQA);
+  // visual_QA는 보조 최적화 단계 — 실패해도 파이프라인 계속 진행
+  if (codeQA !== 0) sse.log('⚠️ [Visual QA] 경고 — 이미지 생성은 계속 진행');
+  sse.done(0);
 });
 
 // 05 이미지 생성

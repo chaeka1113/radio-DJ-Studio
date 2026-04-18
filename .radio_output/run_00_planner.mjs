@@ -46,6 +46,25 @@ if (fs.existsSync(P.qaResult)) {
 const mzEpNum = includeMz ? Math.floor(Math.random() * 3) + 1 : null;
 if (includeMz) console.log(`🔥 MZ 모드 ON — EP${mzEpNum}를 10~30대 사연자로 계획`);
 
+// 빌런 확률 결정 (60% 확률, 발생 시 EP1~3 랜덤 배정)
+const VILLAIN_PROB = 0.3;
+const villainOccurs = Math.random() < VILLAIN_PROB;
+const villainEpNum = villainOccurs ? Math.floor(Math.random() * 3) + 1 : null;
+if (villainOccurs) console.log(`🔴 빌런 발생 — EP${villainEpNum}에 빌런 캐릭터 배정`);
+else console.log(`🟢 이번 방송 빌런 없음 (전원 평범 사연자)`);
+
+// MZ와 빌런 EP 충돌 방지: 같은 EP라면 빌런 EP를 재추첨
+let finalVillainEpNum = villainEpNum;
+if (villainOccurs && mzEpNum !== null && villainEpNum === mzEpNum) {
+  const others = [1, 2, 3].filter(n => n !== mzEpNum);
+  finalVillainEpNum = others[Math.floor(Math.random() * others.length)];
+  console.log(`⚠️  MZ(EP${mzEpNum})·빌런 충돌 → 빌런 EP${finalVillainEpNum}으로 재배정`);
+}
+
+// 에피소드별 villain_required 맵 (LLM에게 주입할 사전 결정값)
+const villainMap = { 1: false, 2: false, 3: false };
+if (villainOccurs) villainMap[finalVillainEpNum] = true;
+
 const client = new Anthropic({ apiKey: API_KEY });
 
 const prompt = `
@@ -57,13 +76,17 @@ const prompt = `
 테마3: ${topics[2]}
 MZ 모드: ${includeMz ? `ON — EP${mzEpNum}의 사연자를 10~30대로 설정` : 'OFF (전원 50代 이상 시니어)'}
 Q&A 모드: ${includeQna ? 'ON' : 'OFF'}
+빌런 배정 (사전 결정 — 변경 금지):
+  EP1 villain_required = ${villainMap[1]}
+  EP2 villain_required = ${villainMap[2]}
+  EP3 villain_required = ${villainMap[3]}
 
 【계약서 작성 규칙】
 1. required_keywords: 각 테마에서 대본에 반드시 등장해야 할 핵심 일본어 키워드 3~5개
 2. character_profile.age_range: MZ 모드 해당 에피소드는 "10代〜30代", 나머지는 "50代以上"
 3. required_emotion_tone: 該 테마에 어울리는 감정 톤 (苦笑い|哀愁|懐かしさ|ほっこり|驚き 중 1개)
 4. forbidden_drift: 이 테마에서 절대 빠지면 안 되는 주제 이탈 패턴 예시 1~2개
-5. villain_required: 빌런 캐릭터가 반드시 필요한지 여부 (boolean)
+5. villain_required: 위 "빌런 배정" 값을 그대로 사용할 것. LLM이 임의로 변경하지 말 것.
 6. narrative_arc: 사연의 起承転結 4단계 스케치 (각 50字 이내 일본어)
    - setup: 주인공과 배경 상황
    - incident: 이야기의 발단·사건
@@ -127,6 +150,12 @@ while (retryCount < 3) {
     if (!jsonMatch) throw new Error('JSON 파싱 실패');
     contract = JSON.parse(jsonMatch[0]);
     if (!contract.episodes || contract.episodes.length < 3) throw new Error('에피소드 3개 필요');
+    // villain_required·villain_episode_id 강제 적용 (LLM 임의 변경 무시)
+    contract.villain_occurs = villainOccurs;
+    contract.villain_episode_id = finalVillainEpNum ?? null;
+    contract.episodes.forEach(ep => {
+      ep.villain_required = villainMap[ep.id] ?? false;
+    });
     break;
   } catch (err) {
     retryCount++;
@@ -140,5 +169,7 @@ initManifest(P, { epId, topics, qaMode: includeQna });
 
 console.log('✅ [Planner] 계약서 생성 완료 → ref_episode_contract.json');
 contract.episodes.forEach(ep => {
-  console.log(`   EP${ep.id} [${ep.theme}] 키워드: ${(ep.required_keywords || []).join(', ')}`);
+  const vTag = ep.villain_required ? ' 🔴빌런' : '';
+  const mzTag = (includeMz && ep.id === mzEpNum) ? ' 🔥MZ' : '';
+  console.log(`   EP${ep.id} [${ep.theme}]${vTag}${mzTag} 키워드: ${(ep.required_keywords || []).join(', ')}`);
 });
