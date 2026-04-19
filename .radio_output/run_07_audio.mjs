@@ -20,11 +20,6 @@ const historyPath      = path.join(__dirname_audio, 'ref_broadcast_history.json'
 const epArgIdx = process.argv.indexOf('--ep');
 const EP_NUM   = epArgIdx !== -1 ? parseInt(process.argv[epArgIdx + 1]) : null;
 
-// ── 규칙 주입 (핵심 규칙만 주입 — 944줄 전체 스펙 대신 ref_tts_v3_core.md 사용) ────
-const referenceKnowledge = fs.existsSync(P.refTtsCore)
-  ? fs.readFileSync(P.refTtsCore, 'utf-8')
-  : fs.readFileSync(P.refTts, 'utf-8'); // fallback: 전체 스펙
-
 // ── FFmpeg 가용성 체크 & 전역 묵음 파일 생성 ──────────────────────────────────
 const SILENCE_SEC = 1.5; // 세그먼트 간 묵음 (초)
 let HAS_FFMPEG = false;
@@ -468,7 +463,7 @@ const audioDir = P.audio;
 
 // ── 메인 실행 ─────────────────────────────────────────────────────────────────
 console.log('🎬 ElevenLabs TTS 파이프라인 시작 (eleven_v3)');
-console.log(`📋 규칙: ref_tts_v3_rules.md 로드됨 (${referenceKnowledge.split('\n').length}줄)`);
+
 console.log(`🎛️  DJ 설정: stability=${DJ_VOICE_SETTINGS.stability} / style=${DJ_VOICE_SETTINGS.style}`);
 console.log(`📦 총 ${audioChunks.length}개 오디오 모듈 생성 예정`);
 

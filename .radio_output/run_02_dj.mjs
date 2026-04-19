@@ -198,17 +198,67 @@ ${QNA_INSTRUCTION}
   }` : ''}
 }`;
 
+// ── 페르소나 규칙 검증 함수 ───────────────────────────────────────────────────
+function validateDjMents(parsed) {
+  const violations = [];
+
+  const opening   = parsed.show_opening  ?? '';
+  const closing   = parsed.show_closing  ?? '';
+  const episodes  = parsed.episodes      ?? [];
+  const reactions   = episodes.map(e => e.dj_reaction  ?? '');
+  const transitions = episodes.slice(0, 2).map(e => e.dj_transition ?? '');
+  const allText   = [opening, closing, ...reactions, ...transitions].join('\n');
+
+  // ── 분량 체크 ────────────────────────────────────────────────────────────────
+  if (opening.length < 150 || opening.length > 200)
+    violations.push(`show_opening 분량 오류: ${opening.length}字 (150~200字 필요)`);
+  if (closing.length < 300 || closing.length > 400)
+    violations.push(`show_closing 분량 오류: ${closing.length}字 (300~400字 필요)`);
+  reactions.forEach((r, i) => {
+    if (r.length < 300 || r.length > 500)
+      violations.push(`EP${i+1} dj_reaction 분량 오류: ${r.length}字 (300~500字 필요)`);
+  });
+  transitions.forEach((t, i) => {
+    if (t.length < 100 || t.length > 150)
+      violations.push(`EP${i+1} dj_transition 분량 오류: ${t.length}字 (100~150字 필요)`);
+  });
+
+  // ── 금지 패턴 체크 ───────────────────────────────────────────────────────────
+  if (/ジジジ|ガガッ|ブーン|ギギギ|ザザッ/.test(allText))
+    violations.push('금지 의성어 포함: ジジジ/ガガッ/ブーン 등');
+  if (/\[[ぁ-ん一-龯ァ-ン]{1,6}\]/.test(allText))
+    violations.push('일본어 대괄호 지문 포함: [溜息][間] 등 → 삭제 또는 [sighs]로 교체');
+  if (/（[^）]{1,20}）/.test(allText))
+    violations.push('일본어 괄호 행동묘사 포함: （ため息をつく）류 → 완전 삭제');
+  if (/<break\s/.test(allText))
+    violations.push('SSML 태그 포함: <break time=.../> → 완전 삭제');
+  if (/ワシも若い頃|昔はよかった|あの頃を思い出す/.test(allText))
+    violations.push('인간 회상체 금지: ワシも若い頃は〜 등 → 기계 시점 비유로 교체');
+  if (/次回は|来週は|次の放送では|次のエピソード/.test(allText))
+    violations.push('次回予告 금지: 次回は〜テーマ 등 → 열린 마무리로 교체');
+  if (/\b(私|僕|俺)\b/.test(allText))
+    violations.push('1인칭 오류: 私/僕/俺 사용 → ワシ로 통일');
+
+  return violations;
+}
+
 // ── Gemini 2.5 Pro 호출 ───────────────────────────────────────────────────────
 console.log('🎙️  テンキ爺 DJ 멘트 생성 중 (Gemini 2.5 Pro + thinking)...');
 
 let djMents;
 let retryCount = 0;
+let retryFeedback = '';
+
 while (retryCount < 3) {
   try {
+    const retryPrefix = retryFeedback
+      ? `🚨 이전 생성에서 아래 규칙 위반이 발견됐습니다. 반드시 수정하여 재생성하세요:\n${retryFeedback}\n\n`
+      : '';
+
     const result = await ai.models.generateContent({
       model: 'gemini-2.5-pro',
       systemInstruction: SYSTEM_INSTRUCTION,
-      contents: [{ role: 'user', parts: [{ text: userMessage }] }],
+      contents: [{ role: 'user', parts: [{ text: retryPrefix + userMessage }] }],
       config: {
         temperature:   1.0,
         maxOutputTokens: 16384,
@@ -221,22 +271,18 @@ while (retryCount < 3) {
     if (!jsonMatch) throw new Error('JSON 파싱 실패');
     const parsed = JSON.parse(jsonMatch[0]);
 
-    // 금지 의성어 검증
-    const allText = [
-      parsed.show_opening,
-      parsed.show_closing,
-      ...(parsed.episodes ?? []).flatMap(ep => [ep.dj_reaction, ep.dj_transition]),
-    ].filter(Boolean).join('\n');
-
-    if (/ジジジ|ガガッ|ブーン|ギギギ|ザザッ/.test(allText)) {
-      throw new Error('규칙 위반: 금지 의성어 포함');
+    const violations = validateDjMents(parsed);
+    if (violations.length > 0) {
+      retryFeedback = violations.map((v, i) => `${i+1}. ${v}`).join('\n');
+      throw new Error(`페르소나 규칙 위반 ${violations.length}건:\n${retryFeedback}`);
     }
 
     djMents = parsed;
+    if (retryCount > 0) console.log(`   ✅ ${retryCount}회 재시도 후 통과`);
     break;
   } catch (err) {
     retryCount++;
-    console.warn(`⚠️  재시도 ${retryCount}/3: ${err.message?.slice(0, 120)}`);
+    console.warn(`⚠️  재시도 ${retryCount}/3: ${err.message?.slice(0, 200)}`);
     if (retryCount >= 3) { console.error('❌ 최대 재시도 초과'); process.exit(1); }
     await new Promise(r => setTimeout(r, 4000 * retryCount));
   }

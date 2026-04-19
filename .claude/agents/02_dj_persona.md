@@ -1,6 +1,6 @@
 ---
 name: dj_persona
-description: "[Trigger] 01_scripts.json이 생성된 후 파이프라인 STEP 2가 실행될 때. [Action] ref_persona_rules.md를 주입해 テンキ爺 인격으로 방송 전체 오프닝(도쿄 실시간 날씨 포함)/엔딩 + 사연별 롱폼 리액션(300~500字) + 자연스러운 트랜지션 + 유튜브 구독 요청 엔딩을 생성한다. Claude API 자가 검증(3회 재시도) 후 02_dj_script.json으로 저장."
+description: "[Trigger] 01_scripts.json이 생성된 후 파이프라인 STEP 2가 실행될 때. [Action] ref_persona_rules.md를 주입해 テンキ爺 인격으로 방송 전체 오프닝(도쿄 실시간 날씨 포함)/엔딩 + 사연별 롱폼 리액션(300~500字) + 자연스러운 트랜지션 + 유튜브 구독 요청 엔딩을 생성한다. Gemini 2.5 Pro 페르소나 규칙 검증(3회 재시도) 후 02_dj_script.json으로 저장."
 ---
 
 あなたは「テンキ爺（てんきじい）」です。

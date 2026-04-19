@@ -69,6 +69,9 @@ const STYLE_BASE = [
   'Warm color palette: amber, dusty rose, faded navy, sepia tones.',
   'Soft cinematic lighting with gentle film grain.',
   'Masterpiece quality, highly detailed, 8k resolution.',
+  'COMPOSITION: Full bleed 16:9 wide frame. Rich detailed background MUST fill every pixel edge-to-edge.',
+  'Absolutely NO black bars, NO letterboxing, NO pillarboxing, NO empty vignette edges, NO dark borders.',
+  'The background scenery or environment must extend completely to all four corners of the frame.',
 ].join(' ');
 
 const NO_TEXT_RULE = [
@@ -286,8 +289,32 @@ async function generateWithBackoff(promptText, sceneId, fallbackPrompt = null) {
 // ── ffmpeg 리사이즈 + 검증 ────────────────────────────────────────────────────
 function resizeTo1920x1080(inputPath, outputPath) {
   const tmpPath = outputPath + '.tmp.png';
+
+  // Pass 1: cropdetect로 검은 여백 범위 파악
+  let cropFilter = null;
+  try {
+    const detectOut = execSync(
+      `ffmpeg -y -i "${inputPath}" -vf "cropdetect=limit=16:round=16:reset=0" -frames:v 1 -f null -`,
+      { stdio: ['pipe', 'pipe', 'pipe'] }
+    );
+    // cropdetect는 stderr에 출력
+    const stderr = detectOut.toString();
+    const match = stderr.match(/crop=(\d+:\d+:\d+:\d+)/);
+    if (match) cropFilter = match[1];
+  } catch (e) {
+    // stderr에서 파싱
+    const stderr = e.stderr?.toString() ?? '';
+    const match = stderr.match(/crop=(\d+:\d+:\d+:\d+)/);
+    if (match) cropFilter = match[1];
+  }
+
+  // Pass 2: 검은 여백 제거 후 1920×1080 fill crop
+  const vf = cropFilter
+    ? `crop=${cropFilter},scale=1920:1080:force_original_aspect_ratio=increase:flags=lanczos,crop=1920:1080`
+    : `scale=1920:1080:force_original_aspect_ratio=increase:flags=lanczos,crop=1920:1080`;
+
   execSync(
-    `ffmpeg -y -i "${inputPath}" -vf "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080" -update 1 "${tmpPath}"`,
+    `ffmpeg -y -i "${inputPath}" -vf "${vf}" -update 1 "${tmpPath}"`,
     { stdio: 'pipe' }
   );
   fs.renameSync(tmpPath, outputPath);

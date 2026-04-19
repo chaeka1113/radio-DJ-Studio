@@ -163,21 +163,6 @@ ${referenceKnowledge}
 - 사건 전후의 심경 변화와 자기 반성을 충분히 서술한다
 - 편지 특유의 인사말과 마무리 문장으로 앞뒤를 감싼다
 
-🎙️ ElevenLabs V3 Audio Tag — script 필드 사용 지침
-사연자 편지(script 필드)에도 영문 Audio Tag를 삽입해 감정을 더욱 풍부하게 표현할 것.
-허용 태그: [sighs] [laughs] [chuckles] [sad] [nervous] [excited] [surprised] [whispers]
-빌런(is_villain=true) 한정 추가 허용: [angry] [scoffs]
-사용 규칙:
-- **필수: 사연 1편당 반드시 3개 이상 삽입** (없거나 부족하면 QA -8점 감점)
-- 사연 전체 기준 3〜8개 적극 활용 — 감정 흐름에 따라 자연스럽게 배치
-- 감정 절정뿐 아니라 긴장·망설임·안도 등 감정 변화 순간마다 삽입 가능
-- 연속 2개 사용 금지, 같은 태그 3회 이상 연속 반복 금지
-- 태그 앞뒤 반드시 공백 1칸 — 예: 「もう限界です。 [sighs] それでも…」
-- 연속 2개 이상 금지 — 예: [sighs] [sad] ← 금지
-- 효과음 계열([applause] [gunshot] 등) 절대 금지
-
----
-
 # 🚨 QA 채점 사전 경고 — 반드시 숙지할 것
 
 당신이 작성한 대본은 생성 직후 아래 가중치 평가표에 따라 항목별로 깐깐하게 채점된다.
@@ -270,10 +255,8 @@ ${hooks.map((h, i) => `후크${i + 1}: ${h}`).join('\n')}
 `
     : '';
 
-  const epPrompt = `${contextBlock}
----
-
-あなたは「テンキ爺の電波局」専属シナリオライターです。
+  // 에피소드별 동적 파트만 (규칙·루브릭은 system prompt 캐시로 분리)
+  const epDynamicPrompt = `あなたは「テンキ爺の電波局」専属シナリオライターです。
 以下のテーマで、ラジオ投稿エピソードを1本執筆してください。
 ${epAgeInstruction}
 
@@ -323,13 +306,15 @@ EP${epNum}: ${contractParts}
 현재 목표: 최소 ${Math.max(800, lastLen + 150)}자 이상\n\n`
       : '';
 
-    const finalPrompt = retryPrefix + epPrompt;
-
     try {
+      // 규칙·루브릭(contextBlock)은 system에 캐싱 — EP1→EP2→EP3·재시도 모두 캐시 hit
       const message = await client.messages.create({
         model: 'claude-sonnet-4-5',
         max_tokens: 4096,
-        messages: [{ role: 'user', content: finalPrompt }],
+        system: [
+          { type: 'text', text: contextBlock, cache_control: { type: 'ephemeral' } },
+        ],
+        messages: [{ role: 'user', content: retryPrefix + epDynamicPrompt }],
       });
       const text = message.content[0].text;
       const jsonMatch = text.match(/\{[\s\S]*\}/);

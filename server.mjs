@@ -107,8 +107,8 @@ app.post('/api/generate-scripts', async (req, res) => {
     sse.log('🧪 테스트 모드 — 히스토리 저장 스킵');
   }
 
-  // 새 파이프라인 실행마다 새 EP_ID 발급
-  currentEpId = generateEpId();
+  // 새 파이프라인 실행마다 새 EP_ID 발급 (정식 방송이면 _youtube 접미사)
+  currentEpId = validEpNum ? `EP_${validEpNum}_youtube` : generateEpId();
   const P = makePaths(currentEpId);
   ensureDirs(P);
   sse.log(`📁 EP_ID: ${currentEpId}`);

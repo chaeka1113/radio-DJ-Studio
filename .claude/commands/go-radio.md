@@ -126,16 +126,16 @@ cd /c/radio-dj-studio && node .radio_output/run_04_storyboard.mjs
 
 ---
 
-## STEP 6 — 이미지 생성 (Imagen 4.0 전용, 폴백 없음)
+## STEP 6 — 이미지 생성 (Gemini 2.5 Flash Image, 16:9 고정)
 **에이전트:** `.claude/agents/05_art_director.md`
 
-> ⚠️ 실제 API 크레딧 소모. 씬 수 × 7초 소요.
-> 429 에러 → 지수 백오프(30s/60s/120s) 후 Imagen 4.0으로만 재시도.
+> ⚠️ 실제 API 크레딧 소모. 씬 수 × 15초 딜레이.
+> 429 에러 → 지수 백오프(30s/60s/120s) 후 재시도.
 
 ```bash
-cd /c/radio-dj-studio && node .radio_output/run_05_images.mjs
+cd /c/radio-dj-studio && EP_ID=$EP_ID node .radio_output/run_05_images.mjs
 ```
-완료 조건: `.radio_output/05_image_results.json`, `images/*.png`
+완료 조건: `.output/{EP_ID}/05_image_results.json`, `images/*.png`
 
 ---
 
@@ -143,12 +143,30 @@ cd /c/radio-dj-studio && node .radio_output/run_05_images.mjs
 **에이전트:** `.claude/agents/07_audio_director.md`
 
 ```bash
-cd /c/radio-dj-studio && node .radio_output/run_07_audio.mjs
+cd /c/radio-dj-studio && EP_ID=$EP_ID node .radio_output/run_07_audio.mjs
 ```
 - `08_qa_script.json` 존재 시 EP2 다음에 즉문즉답 코너 자동 삽입
 - 오염 텍스트 자동 검수·제거
 
-완료 조건: `.radio_output/final_script_for_tts.txt`
+완료 조건: `.output/{EP_ID}/audio/*.mp3`
+
+---
+
+## STEP 7-B — CapCut 드래프트 생성 (선택)
+
+```bash
+cd /c/radio-dj-studio && EP_ID=$EP_ID node .radio_output/run_06_capcut_builder.mjs
+```
+완료 조건: `.output/{EP_ID}/capcut/draft_content.json`
+
+---
+
+## STEP 7-C — Wrapup (방송 히스토리·learnings 업데이트)
+
+```bash
+cd /c/radio-dj-studio && EP_ID=$EP_ID node .radio_output/run_99_wrapup.mjs
+```
+완료 조건: `.claude/skills/ref_learnings.md` 갱신
 
 ---
 
