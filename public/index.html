@@ -619,6 +619,10 @@ body {
       <input type="checkbox" id="includeQna">
       <span>💬 Q&A 코너</span>
     </label>
+    <label style="display:flex;align-items:center;gap:6px;">
+      <span style="white-space:nowrap;">📺 EP번호</span>
+      <input id="epNum" type="number" min="1" placeholder="비우면 테스트" style="width:90px;padding:4px 6px;background:var(--bg2);border:1px solid var(--border);color:var(--fg);border-radius:3px;font-size:12px;">
+    </label>
   </div>
   <div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0;">
     <button class="sk-btn primary" onclick="runFullPipeline(true)">🌐 트렌드 자동 생성</button>
@@ -886,10 +890,12 @@ async function runFullPipeline(autoTrend = false) {
 
   const _includeMz  = document.getElementById('includeMz').checked;
   const _includeQna = document.getElementById('includeQna').checked;
+  const _epNum      = parseInt(document.getElementById('epNum').value) || null;
   if (_includeMz) appendLog('🔥 MZ 모드 활성');
+  if (_epNum)     appendLog(`📺 정식 방송 모드 — EP${_epNum}`);
 
   setPipeStep('01', 'run'); setDot('01', 'run');
-  let r = await streamStep('/api/generate-scripts', { topics, includeMz: _includeMz, includeQna: _includeQna, autoTrend });
+  let r = await streamStep('/api/generate-scripts', { topics, includeMz: _includeMz, includeQna: _includeQna, autoTrend, epNum: _epNum });
   if (!r.success) { setPipeStep('01','bad'); setDot('01','bad'); appendLog('❌ 01 대본 실패', 'error'); showToast('❌ 대본 생성 실패'); return; }
   setPipeStep('01','ok'); setPipeStep('01q','ok'); setDot('01','ok');
   await loadScripts(); setTab('scripts');
@@ -937,7 +943,8 @@ async function runStep(step, force = false) {
       const t2 = document.getElementById('topic2').value.trim();
       const t3 = document.getElementById('topic3').value.trim();
       if (!t1 || !t2 || !t3) { showToast('❌ 주제 3개를 입력하세요'); return null; }
-      return { topics:[t1,t2,t3], includeMz: document.getElementById('includeMz').checked, includeQna: document.getElementById('includeQna').checked };
+      const epNum = parseInt(document.getElementById('epNum').value) || null;
+      return { topics:[t1,t2,t3], includeMz: document.getElementById('includeMz').checked, includeQna: document.getElementById('includeQna').checked, epNum };
     }],
     '02':     ['/api/generate-dj', () => ({ includeQna: document.getElementById('includeQna').checked })],
     '04':     ['/api/generate-storyboard', () => ({})],

@@ -257,28 +257,48 @@ function calcSceneDurations(chunkId, sceneCount) {
   const chars = chunk.segments.flatMap(s => s.alignment.characters);
   const ends  = chunk.segments.flatMap(s => s.alignment.character_end_times_seconds);
 
-  const boundaries = [];
+  // ElevenLabs가 여러 문자에 동일 타임스탬프를 할당할 수 있음 → ms 단위 중복 제거
+  const boundaryMs = new Set();
   for (let i = 0; i < chars.length - 1; i++) {
-    if (SENTENCE_END.has(chars[i])) boundaries.push(ends[i]);
+    if (SENTENCE_END.has(chars[i]) && ends[i] > 0 && ends[i] < chunk.durSec) {
+      boundaryMs.add(Math.round(ends[i] * 1000));
+    }
   }
-  boundaries.push(chunk.durSec);
+  const boundaries = [...boundaryMs].map(ms => ms / 1000).sort((a, b) => a - b);
 
-  if (boundaries.length < sceneCount) {
-    console.warn(`  ⚠  ${chunkId}: 문장경계 ${boundaries.length}개 < 씬 수 ${sceneCount}개 → 균등분할`);
+  // 균등분할 폴백: 유니크 경계가 씬 수보다 적을 때
+  if (boundaries.length < sceneCount - 1) {
+    console.warn(`  ⚠  ${chunkId}: 유니크 경계 ${boundaries.length}개 < 씬-1 ${sceneCount - 1}개 → 균등분할`);
     const perUs = Math.round(totalUs / sceneCount);
     const durs  = Array(sceneCount).fill(perUs);
     durs[durs.length - 1] += totalUs - perUs * sceneCount;
     return durs;
   }
 
-  const step      = boundaries.length / sceneCount;
-  const cutPoints = [0];
+  // 이상적 시간 위치에 가장 가까운 유니크 경계 N-1개 선택 (단조증가 보장)
+  const selected = [];
   for (let i = 1; i < sceneCount; i++) {
-    const bIdx = Math.min(Math.round(i * step) - 1, boundaries.length - 1);
-    cutPoints.push(boundaries[bIdx]);
+    const idealTime = (i / sceneCount) * chunk.durSec;
+    const minTime   = selected.length > 0 ? selected[selected.length - 1] + 0.05 : 0.05;
+    let best = null, bestDist = Infinity;
+    for (const b of boundaries) {
+      if (b <= minTime) continue;
+      const dist = Math.abs(b - idealTime);
+      if (dist < bestDist) { bestDist = dist; best = b; }
+    }
+    if (best !== null) selected.push(best);
   }
-  cutPoints.push(chunk.durSec);
 
+  if (selected.length < sceneCount - 1) {
+    // 선택 가능한 경계 부족 → 균등분할
+    console.warn(`  ⚠  ${chunkId}: 선택 경계 ${selected.length}개 부족 → 균등분할`);
+    const perUs = Math.round(totalUs / sceneCount);
+    const durs  = Array(sceneCount).fill(perUs);
+    durs[durs.length - 1] += totalUs - perUs * sceneCount;
+    return durs;
+  }
+
+  const cutPoints = [0, ...selected, chunk.durSec];
   const durs = [];
   for (let i = 0; i < sceneCount; i++) {
     durs.push(Math.round((cutPoints[i + 1] - cutPoints[i]) * 1_000_000));

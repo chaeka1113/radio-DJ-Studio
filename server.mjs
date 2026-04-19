@@ -234,10 +234,6 @@ app.post('/api/generate-scripts', async (req, res) => {
     const scriptCode = await runScript(sse, 'run_01_script.mjs', pipelineArgs);
     if (scriptCode !== 0) return sse.done(scriptCode);
 
-    // 진단: QA 직전 스크립트 파일 존재 확인
-    sse.log(`[DEBUG] P.scripts = ${P.scripts}`);
-    sse.log(`[DEBUG] exists = ${fs.existsSync(P.scripts)}`);
-
     sse.log(`🔍 [QA] 대본 검증 중 (시도 ${attempt}/3)...`);
     // 이전 시도의 stale qaResult 제거 — QA가 조기 종료해도 오래된 결과를 읽지 않도록
     if (fs.existsSync(P.qaResult)) fs.unlinkSync(P.qaResult);

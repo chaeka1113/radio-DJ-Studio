@@ -191,7 +191,7 @@ for (const tsFile of tsFiles) {
     }
     // 다음 세그먼트 오프셋 = 현재 세그먼트 실제 오디오 길이 + 묵음 간격
     // duration_sec: run_07에서 MP3 버퍼 크기로 계산한 실제 길이 (있으면 사용, 없으면 last timestamp)
-    const segDur = seg.duration_sec ?? (ends.length > 0 ? ends[ends.length - 1] : 0);
+    const segDur = ends.length > 0 ? ends[ends.length - 1] : (seg.duration_sec ?? 0);
     segSubOffset += segDur + silenceSec;
   }
 }
@@ -234,6 +234,16 @@ function buildSubtitles(chars) {
 
 const subtitles = buildSubtitles(filtered);
 console.log(`📋 자막 라인 수: ${subtitles.length}`);
+
+// 연속 자막 겹침 제거 — 。타임스탬프가 다음 문장 시작보다 늦을 때 발생
+for (let i = 0; i < subtitles.length - 1; i++)
+  if (subtitles[i].end > subtitles[i + 1].start)
+    subtitles[i].end = subtitles[i + 1].start;
+
+// 마지막 자막을 BREATHING_ROOM(2s)만큼 연장 — 씬 끝까지 표시
+const BREATHING_ROOM_SEC = 2;
+if (subtitles.length > 0)
+  subtitles[subtitles.length - 1].end += BREATHING_ROOM_SEC;
 
 // ─── STEP 5: SRT 저장 ────────────────────────────────────────────────────────
 const srtLines = subtitles.map((s, i) => {

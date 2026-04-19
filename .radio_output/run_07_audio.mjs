@@ -141,6 +141,46 @@ function autoInjectDJTags(text) {
 // ── DJ 요청 ID 추적 (previous_request_ids용) ──────────────────────────────────
 const djRequestIds = []; // 최근 3개까지 보관 (현재 미사용 — 보이스 호환성 이슈로 비활성화)
 
+// ── ElevenLabs alignment 복구 ────────────────────────────────────────────────
+// 동일 타임스탬프가 연속된 클러스터를 검출하여 선형 보간으로 복구.
+// ElevenLabs가 긴 문장에서 발화 추적을 잃으면 수백 자가 같은 값으로 뭉침.
+function repairAlignment(alignment, estimatedDurSec) {
+  if (!alignment?.characters?.length) return alignment;
+  const n    = alignment.characters.length;
+  const ends = [...alignment.character_end_times_seconds];
+  const hasSt = Array.isArray(alignment.character_start_times_seconds);
+  const starts = hasSt ? [...alignment.character_start_times_seconds] : null;
+
+  let repaired = 0;
+  let i = 0;
+  while (i < n) {
+    let j = i;
+    // 같은 값이 연속되는 클러스터 끝을 찾음
+    while (j + 1 < n && ends[j + 1] === ends[i]) j++;
+    if (j > i) {
+      const tBefore = i > 0 ? ends[i - 1] : 0;
+      const tAfter  = j + 1 < n ? ends[j + 1] : estimatedDurSec;
+      const count   = j - i + 1;
+      for (let k = 0; k < count; k++) {
+        ends[i + k] = parseFloat((tBefore + (tAfter - tBefore) * (k + 1) / (count + 1)).toFixed(4));
+        if (starts)
+          starts[i + k] = parseFloat((tBefore + (tAfter - tBefore) * k / (count + 1)).toFixed(4));
+      }
+      repaired += count;
+    }
+    i = j + 1;
+  }
+
+  if (repaired > 0)
+    console.warn(`   🔧 alignment 복구: ${repaired}자 선형 보간 (총 ${n}자, 추정길이 ${estimatedDurSec.toFixed(1)}s)`);
+
+  return {
+    ...alignment,
+    character_end_times_seconds: ends,
+    ...(starts ? { character_start_times_seconds: starts } : {}),
+  };
+}
+
 // ── ElevenLabs API 단일 호출 ──────────────────────────────────────────────────
 function callElevenLabsOnce(cleaned, voiceId, voiceSettings, prevRequestIds = []) {
   const settings = voiceSettings || { stability: 0.5, similarity_boost: 0.75 };
@@ -337,7 +377,11 @@ async function processChunk(chunk) {
       const segFile = path.join(tmpDir, `seg_${segFiles.length}_${item.label.replace(/\s+/g, '_')}.mp3`);
       fs.writeFileSync(segFile, audioBuffer);
       segFiles.push(segFile);
-      if (alignment) alignments.push({ label: item.label, voiceId: item.voiceId, alignment });
+      if (alignment) {
+        const estimatedDurSec = audioBuffer.length / (128 * 1024 / 8);
+        const fixedAlignment  = repairAlignment(alignment, estimatedDurSec);
+        alignments.push({ label: item.label, voiceId: item.voiceId, alignment: fixedAlignment });
+      }
       process.stdout.write(`✅ (${(audioBuffer.length / 1024).toFixed(1)} KB)\n`);
     } catch (err) {
       process.stdout.write(`❌ ${err.message.slice(0, 80)}\n`);
