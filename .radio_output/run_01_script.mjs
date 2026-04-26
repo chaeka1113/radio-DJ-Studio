@@ -171,6 +171,26 @@ ${referenceKnowledge}
 
 ${scriptRubric}
 
+---
+
+# 🚨 script 필드 행동 묘사 완전 금지 — 형태 불문 (QA Stage 1 즉시 Fail)
+
+**괄호 형태 금지는 당연하고, 산문 동사구도 금지다.**
+ElevenLabs V3는 일본어 행동·감정 동사구를 그대로 읽어버려 TTS 품질이 급격히 저하된다.
+
+| 금지 패턴 | 위반 이유 | 올바른 대체 |
+|-----------|-----------|------------|
+| ため息をつく日もありました | 행동 동사구 — TTS가 발화 | [sighs] 深い溜息が出る夜もありました |
+| 小さくため息をつく姿を見ると | 행동 동사구 — TTS가 발화 | 妻がため息をついた。 [sighs] |
+| 嬉しそうに笑いました | 감정 동사구 | [excited] 笑いました |
+| （涙をぬぐう） | 괄호 지문 | 완전 삭제 |
+
+행동·감정은 **V3 허용 영문 Audio Tag** 또는 **상태 명사**로만 표현하라.
+
+허용 Audio Tag (script 필드): [sighs] [laughs] [chuckles] [sad] [nervous] [excited] [surprised] [whispers] [clears throat] [inhales sharply] [exhales slowly]
+빌런 한정(is_villain=true): [angry] [scoffs]
+★위 목록 외 태그([happy] [calm] [cheerful] 등) 사용 → QA Stage 1 즉시 Fail★
+
 ${japanFacts ? `---
 
 # 📊 日本 実データ — 수치 작성 시 이 범위 내로만 사용 (ref_japan_facts.md)
@@ -189,6 +209,7 @@ ${pastLearnings}
 console.log('📝 대본 생성 중 (Claude API — 에피소드별 개별 호출)...');
 
 const episodes = [];
+const usedNames = new Set(); // 에피소드 간 이름 중복 방지용 추적
 
 for (let epIdx = 0; epIdx < 3; epIdx++) {
   const epNum = epIdx + 1;
@@ -255,11 +276,20 @@ ${hooks.map((h, i) => `후크${i + 1}: ${h}`).join('\n')}
 `
     : '';
 
+  // 이미 생성된 에피소드 이름 → 중복 방지 금지 목록
+  const forbiddenNamesNote = usedNames.size > 0
+    ? `
+【🚫 이름 중복 절대 금지 — QA Stage 1 즉시 Fail 대상】
+이번 방송에서 이미 등장한 사연자 이름: [${[...usedNames].join('、')}]
+위 이름과 완전히 다른 이름을 사용하라. 성씨(苗字)까지 달라야 한다.
+`
+    : '';
+
   // 에피소드별 동적 파트만 (규칙·루브릭은 system prompt 캐시로 분리)
   const epDynamicPrompt = `あなたは「テンキ爺の電波局」専属シナリオライターです。
 以下のテーマで、ラジオ投稿エピソードを1本執筆してください。
 ${epAgeInstruction}
-
+${forbiddenNamesNote}
 テーマ: ${topic}
 ${contractParts ? `
 【📋 計画書 制約 — QA 通過のため必ず守ること】
@@ -350,6 +380,8 @@ EP${epNum}: ${contractParts}
     }
   }
 
+  // 생성된 이름을 추적 (다음 에피소드의 forbiddenNamesNote에 반영)
+  if (epData?.character?.name) usedNames.add(epData.character.name.trim());
   episodes.push(epData);
 
   // 에피소드 간 딜레이 (rate limit 방어)

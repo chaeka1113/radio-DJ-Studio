@@ -94,10 +94,13 @@ const OUTPUT_DIR = P.capcut;
 const OUTPUT_PATH= path.join(OUTPUT_DIR, 'draft_content.json');
 
 const SCALE_MAX        = 1.15;
-const SCALE_Y          = SCALE_MAX ** 2;          // 1.3225
-const UNIFORM_VAL      = 1 / SCALE_MAX;           // 0.8695...
+const SCALE_Y          = SCALE_MAX ** 2;          // 1.3225 — 마스터 템플릿 원본값 유지
+const UNIFORM_VAL      = 1 / SCALE_MAX;           // 0.8695 — 마스터 템플릿 원본값 유지
 const KF_T0            = 0.050;
 const KF_T1            = 0.962;
+const STK_SCALE        = 0.18;                    // 스티커 크기 (1.0 = canvas_half_height)
+const STK_X            = -1.30;                   // 스티커 X (-1.7778=왼쪽 끝, 0=중앙)
+const STK_Y            = -0.68;                   // 스티커 Y (-1.0=아래 끝, +1.0=위 끝)
 const TRANS_DURATION   = 1_000_000;               // B 페이드 1.0s
 const NOISE_OUT_DUR    = 2_000_000;               // 노이즈 아웃 2.0s
 const WHITE_IN_DUR     = 2_300_000;               // 화이트 인 2.3s
@@ -442,9 +445,10 @@ function buildScaleKeyframes(segDurUs) {
   const t0 = Math.round(segDurUs * KF_T0);
   const t1 = Math.round(segDurUs * KF_T1);
   const kf  = (t, v) => ({ id: newUUID(), curveType: 'Line', time_offset: t, left_control: { x: 0, y: 0 }, right_control: { x: 0, y: 0 }, values: [v], string_value: '', graphID: '' });
+  // uniform_scale.on=true 이면 CapCut이 X/Y를 자동 연동 → ScaleX만 있어야 함
+  // ScaleX + ScaleY 둘 다 있으면 lock과 충돌하여 두 키프레임 모두 무시됨
   return [
     { id: newUUID(), material_id: '', property_type: 'KFTypeScaleX', keyframe_list: [kf(t0, 1.0), kf(t1, SCALE_MAX)] },
-    { id: newUUID(), material_id: '', property_type: 'KFTypeScaleY', keyframe_list: [kf(t0, 1.0), kf(t1, SCALE_MAX)] },
   ];
 }
 
@@ -569,9 +573,9 @@ function makeStickerSegment({ materialId, start, dur, extraRefs }) {
     intensifies_audio: false, cartoon: false,
     volume: 1, last_nonzero_volume: 1,
     clip: {
-      scale: { x: 0.3622848076999904, y: 0.3622848076999904 },
+      scale: { x: STK_SCALE, y: STK_SCALE },
       rotation: 0,
-      transform: { x: -0.8591114700620858, y: 0.7420398106612951 },
+      transform: { x: STK_X, y: STK_Y },
       flip: { vertical: false, horizontal: false },
       alpha: 1,
     },

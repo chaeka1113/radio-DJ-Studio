@@ -19,6 +19,16 @@ export function validateScripts(data, { minScriptLen = 800 } = {}) {
       errors.push(`${tag}.script ${ep.script.length}字 — ${minScriptLen}字 미만`);
   });
 
+  // 에피소드 간 캐릭터 이름 유니크성 검사
+  const charNames = (data?.episodes ?? []).map(ep => ep.character?.name?.trim()).filter(Boolean);
+  const nameSeen = new Set();
+  for (const n of charNames) {
+    if (nameSeen.has(n)) {
+      errors.push(`캐릭터 이름 중복: "${n}" — 3개 에피소드 이름은 모두 달라야 함`);
+    }
+    nameSeen.add(n);
+  }
+
   if (errors.length > 0) {
     console.error('❌ [validate] 01_scripts.json 스키마 오류:');
     errors.forEach(e => console.error(`   · ${e}`));

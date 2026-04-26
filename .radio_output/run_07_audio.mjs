@@ -95,7 +95,30 @@ function cleanForTTS(text) {
   text = text.replace(/\[[^\]]*[\u3040-\u9fff][^\]]*\]/g, '');
   // 4. SSML 태그 제거 — V3 미지원
   text = text.replace(/<[^>]+>/g, '');
-  // 5. 영문 Audio Tag([sighs],[laughs] 등)는 그대로 통과 — V3 native 지원
+  // 5. 비허용 영문 Audio Tag 교체/제거 — 허용 목록 외 태그 최후 방어선
+  {
+    const ALLOWED_TTS_TAGS = new Set([
+      'sighs', 'laughs', 'chuckles', 'scoffs', 'angry', 'whispers',
+      'surprised', 'sad', 'excited', 'nervous', 'clears throat',
+      'inhales sharply', 'exhales slowly',
+    ]);
+    const TAG_REMAP = {
+      'happy': 'excited',    'cheerful': 'excited', 'delighted': 'excited', 'proud': 'excited',
+      'calm': 'sighs',       'relieved': 'sighs',   'grateful': 'sighs',
+      'confused': 'nervous', 'worried': 'nervous',  'frightened': 'nervous', 'embarrassed': 'nervous',
+    };
+    text = text.replace(/\[([a-zA-Z ]+)\]/g, (match, tag) => {
+      const tagLower = tag.toLowerCase().trim();
+      if (ALLOWED_TTS_TAGS.has(tagLower)) return match;
+      const remapped = TAG_REMAP[tagLower];
+      if (remapped) {
+        process.stdout.write(`\n   ⚠️  cleanForTTS: [${tag}] → [${remapped}] 자동 교체`);
+        return `[${remapped}]`;
+      }
+      process.stdout.write(`\n   ⚠️  cleanForTTS: [${tag}] 제거 (허용 목록 외)`);
+      return '';
+    });
+  }
   // 6. 한국어(가-힣) 완전 제거 — TTS는 일본어 전용
   text = text.replace(/[가-힣]+/g, '');
   // 7. 공백 정리

@@ -12,6 +12,21 @@ type: reference
 
 ---
 
+## Stage 1 — 프로그래매틱 즉시 Fail 항목 (점수 무관)
+
+아래 항목은 Stage 2 루브릭 채점 **전** Stage 1에서 코드로 검출하여 **총점과 무관하게 즉시 Fail** 처리.
+단 1건이라도 해당되면 `01_qa_feedback.json` 저장 → 파이프라인이 `01_script` 재실행(최대 3회).
+
+| 검사 항목 | 판정 기준 | 영향 에피소드 |
+|-----------|-----------|--------------|
+| 비허용 Audio Tag | script 필드에 허용 목록 외 영문 태그 (`[happy]` `[calm]` 등) | 해당 EP Fail |
+| 빌런 전용 Tag 오용 | `[angry]` `[scoffs]`를 `is_villain=false` 캐릭터가 사용 | 해당 EP Fail |
+| 캐릭터 이름 중복 | EP1·EP2·EP3 중 `character.name` 완전 동일 값 2개 이상 | 중복 EP 전부 Fail |
+
+**Generator에게**: 위 3가지 위반은 점수로 구제 불가. 생성 단계에서 원천 차단하라.
+
+---
+
 ## 항목 1 — 계약(Contract) 완벽 이행 [배점 25점]
 
 `ref_episode_contract.json`에 명시된 제약을 **억지스럽지 않게** 대본 스토리에 반영해야 한다.

@@ -90,9 +90,49 @@ ensureDirs(P);
       }
     }
 
+    // 1-E. Audio Tag 화이트리스트 검사 (script 필드)
+    const ALLOWED_SCRIPT_TAGS = new Set([
+      'sighs', 'laughs', 'chuckles', 'sad', 'nervous', 'excited',
+      'surprised', 'whispers', 'clears throat', 'inhales sharply', 'exhales slowly',
+    ]);
+    const VILLAIN_ONLY_TAGS = new Set(['angry', 'scoffs']);
+    const isVillain = ep.character?.is_villain === true;
+    const tagMatches = [...(ep.script || '').matchAll(/\[([a-zA-Z ]+)\]/g)];
+    for (const m of tagMatches) {
+      const tagLower = m[1].toLowerCase().trim();
+      if (VILLAIN_ONLY_TAGS.has(tagLower)) {
+        if (!isVillain) {
+          issues.push(`빌런 전용 Audio Tag [${m[1]}] — is_villain=false 캐릭터에 사용 불가`);
+        }
+      } else if (!ALLOWED_SCRIPT_TAGS.has(tagLower)) {
+        issues.push(`비허용 Audio Tag [${m[1]}] — V3 허용 목록 외 태그 (script 필드)`);
+      }
+    }
+
     const pass = issues.length === 0;
     return { id: ep.id, pass, issues, reqTone: cEp.required_emotion_tone, actualTone: ep.emotion_tone, script: ep.script };
   });
+
+  // 에피소드 간 캐릭터 이름 중복 검사 (cross-episode, Stage 1 범위)
+  {
+    const names = (scripts.episodes || []).map(ep => ep.character?.name?.trim()).filter(Boolean);
+    const seen = new Set();
+    const dupes = new Set();
+    for (const n of names) {
+      if (seen.has(n)) dupes.add(n);
+      seen.add(n);
+    }
+    if (dupes.size > 0) {
+      console.log(`❌ [QA Stage 1] 캐릭터 이름 중복 감지: [${[...dupes].join(', ')}]`);
+      for (const r of stage1Results) {
+        const ep = (scripts.episodes || []).find(e => e.id === r.id);
+        if (ep && dupes.has(ep.character?.name?.trim())) {
+          r.issues.push(`캐릭터 이름 중복 ["${ep.character.name}"] — 에피소드 간 이름은 모두 달라야 함`);
+          r.pass = false;
+        }
+      }
+    }
+  }
 
   const stage1Pass = stage1Results.every(r => r.pass);
 
