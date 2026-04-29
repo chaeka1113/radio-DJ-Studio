@@ -625,12 +625,8 @@ async function updateBroadcastHistory(epNum) {
     history = JSON.parse(fs.readFileSync(historyPath, 'utf-8'));
   }
 
-  // 이미 같은 EP 번호가 히스토리에 있으면 덮어쓰지 않고 경고
-  const alreadyExists = history.episodes.find(e => e.ep_num === epNum);
-  if (alreadyExists) {
-    console.log(`⚠️ EP${epNum} 히스토리가 이미 존재합니다. 저장 스킵.`);
-    return;
-  }
+  const isOverwrite = history.episodes.some(e => e.ep_num === epNum);
+  if (isOverwrite) console.log(`♻️  EP${epNum} 히스토리 덮어쓰기 모드`);
 
   console.log(`📼 EP${epNum} 히스토리 저장 시작...`);
 
@@ -654,7 +650,8 @@ async function updateBroadcastHistory(epNum) {
     })(),
   };
 
-  // 청취자 정보 추가 / 재등장 시 last_appeared 갱신
+  // 재생성 시 기존 EP_NUM 리스너 제거 후 새로 추가
+  history.listeners = history.listeners.filter(l => l.first_appeared !== epNum);
   const newListeners = (scripts?.episodes || []).map(ep => ({
     name: ep.character?.name || '不明',
     age: parseInt(ep.character?.age) || 60,
@@ -674,7 +671,13 @@ async function updateBroadcastHistory(epNum) {
     }
   }
 
-  history.episodes.push(epEntry);
+  // episode 항목 교체 또는 신규 추가
+  const existingIdx = history.episodes.findIndex(e => e.ep_num === epNum);
+  if (existingIdx !== -1) {
+    history.episodes[existingIdx] = epEntry;
+  } else {
+    history.episodes.push(epEntry);
+  }
   history.meta.total_episodes = history.episodes.length;
   history.meta.last_updated = today;
 

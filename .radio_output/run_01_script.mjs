@@ -119,12 +119,29 @@ const historyContext = buildHistoryContext(historyPath, topics, EP_NUM);
 if (historyContext) console.log('📚 [History] 과거 방송 컨텍스트 주입 완료');
 
 // ── 전역 상태 초기화 ───────────────────────────────────────────────────────────
+// 재시도 모드: qaFeedback이 있으면 기존 통과 EP를 미리 캐싱 후 scripts만 보존
+const failedEpIds = new Set((qaFeedback?.episodes || []).map(e => e.id));
+const cachedPassEps = (() => {
+  if (!qaFeedback || !fs.existsSync(P.scripts)) return {};
+  const existing = JSON.parse(fs.readFileSync(P.scripts, 'utf-8'));
+  const result = {};
+  for (const ep of (existing.episodes || [])) {
+    if (!failedEpIds.has(ep.id)) result[ep.id] = ep;
+  }
+  return result;
+})();
+const isRetry = qaFeedback !== null;
+if (isRetry && Object.keys(cachedPassEps).length > 0)
+  console.log(`♻️  재시도 모드 — EP[${Object.keys(cachedPassEps).join(',')}] 재사용, EP[${[...failedEpIds].join(',')}] 재생성`);
+
 console.log('🗑  이전 작업물 초기화 중...');
 const STALE_FILES = [
-  P.scripts, P.djScript, P.characterPrompts,
+  P.djScript, P.characterPrompts,
   P.storyboard, P.storyboardSummary, P.imageResults,
   P.qaScript,
 ];
+// 재시도 시 scripts는 루프 완료 후 덮어쓰므로 여기서 삭제하지 않음
+if (!isRetry && fs.existsSync(P.scripts)) { fs.rmSync(P.scripts); console.log(`   삭제: ${P.scripts.split('/').pop()}`); }
 for (const fp of STALE_FILES) {
   if (fs.existsSync(fp)) { fs.rmSync(fp); console.log(`   삭제: ${fp.split('/').pop()}`); }
 }
@@ -214,6 +231,15 @@ const usedNames = new Set(); // 에피소드 간 이름 중복 방지용 추적
 for (let epIdx = 0; epIdx < 3; epIdx++) {
   const epNum = epIdx + 1;
   const topic = topics[epIdx];
+
+  // 재시도 모드에서 통과한 EP는 캐시 그대로 사용
+  if (cachedPassEps[epNum]) {
+    console.log(`   ✅ EP${epNum} 재사용 (QA 통과 캐시)`);
+    episodes.push(cachedPassEps[epNum]);
+    if (cachedPassEps[epNum].character?.name) usedNames.add(cachedPassEps[epNum].character.name.trim());
+    continue;
+  }
+
   const cEp = (contract?.episodes || []).find(e => e.id === epNum) || {};
 
   // 이 에피소드의 contract 제약

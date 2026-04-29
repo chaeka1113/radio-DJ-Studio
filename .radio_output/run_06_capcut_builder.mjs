@@ -96,8 +96,6 @@ const OUTPUT_PATH= path.join(OUTPUT_DIR, 'draft_content.json');
 const SCALE_MAX        = 1.15;
 const SCALE_Y          = SCALE_MAX ** 2;          // 1.3225 — 마스터 템플릿 원본값 유지
 const UNIFORM_VAL      = 1 / SCALE_MAX;           // 0.8695 — 마스터 템플릿 원본값 유지
-const KF_T0            = 0.050;
-const KF_T1            = 0.962;
 const STK_SCALE        = 0.18;                    // 스티커 크기 (1.0 = canvas_half_height)
 const STK_X            = -1.30;                   // 스티커 X (-1.7778=왼쪽 끝, 0=중앙)
 const STK_Y            = -0.68;                   // 스티커 Y (-1.0=아래 끝, +1.0=위 끝)
@@ -454,16 +452,6 @@ function addAux(aux) {
 }
 
 // ─── 세그먼트 팩토리 ──────────────────────────────────────────────────────────
-function buildScaleKeyframes(segDurUs) {
-  const t0 = Math.round(segDurUs * KF_T0);
-  const t1 = Math.round(segDurUs * KF_T1);
-  const kf  = (t, v) => ({ id: newUUID(), curveType: 'Line', time_offset: t, left_control: { x: 0, y: 0 }, right_control: { x: 0, y: 0 }, values: [v], string_value: '', graphID: '' });
-  return [
-    { id: newUUID(), material_id: '', property_type: 'KFTypeScaleX', keyframe_list: [kf(t0, 1.0), kf(t1, SCALE_MAX)] },
-    { id: newUUID(), material_id: '', property_type: 'KFTypeScaleY', keyframe_list: [kf(t0, 1.0), kf(t1, SCALE_MAX)] },
-  ];
-}
-
 function makeClip() {
   return { scale: { x: SCALE_MAX, y: SCALE_Y }, rotation: 0.0, transform: { x: 0.0, y: 0.0 }, flip: { vertical: false, horizontal: false }, alpha: 1.0 };
 }
@@ -493,7 +481,7 @@ function makeVideoSegment({ materialId, start, dur, extraRefs, renderIndex }) {
     track_attribute: 0, is_placeholder: false,
     template_id: '', enable_smart_color_adjust: false,
     template_scene: 'default',
-    common_keyframes: buildScaleKeyframes(dur),
+    common_keyframes: [],
     caption_info: null,
     responsive_layout: { enable: false, target_follow: '', size_layout: 0, horizontal_pos_layout: 0, vertical_pos_layout: 0 },
     enable_color_match_adjust: false, enable_color_correct_adjust: false,
@@ -942,20 +930,6 @@ function validate(draft) {
     for (const kf of s.common_keyframes || []) {
       if (kf.property_type && kf.property_type.includes('Position'))
         errors.push(`[${s.id.slice(0,8)}] Position KF 존재 금지`);
-    }
-  }
-  for (const s of videoSegs) {
-    const dur = s.target_timerange.duration;
-    const hasScaleX = (s.common_keyframes || []).some(kf => kf.property_type === 'KFTypeScaleX');
-    const hasScaleY = (s.common_keyframes || []).some(kf => kf.property_type === 'KFTypeScaleY');
-    if (hasScaleX && !hasScaleY) errors.push(`[${s.id.slice(0,8)}] KFTypeScaleY 누락`);
-    for (const kf of s.common_keyframes || []) {
-      if (kf.property_type === 'KFTypeScaleX') {
-        const r0 = kf.keyframe_list[0].time_offset / dur;
-        const r1 = kf.keyframe_list[1].time_offset / dur;
-        if (Math.abs(r0 - KF_T0) > 0.003) errors.push(`[${s.id.slice(0,8)}] KF_T0 비율 이상: ${r0.toFixed(4)}`);
-        if (Math.abs(r1 - KF_T1) > 0.003) errors.push(`[${s.id.slice(0,8)}] KF_T1 비율 이상: ${r1.toFixed(4)}`);
-      }
     }
   }
   if (draft.duration !== TOTAL_US)

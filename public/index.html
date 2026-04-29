@@ -995,6 +995,13 @@ function streamStep(url, body) {
                       document.getElementById('topic3').value = tt[2].trim();
                       showToast('🌐 트렌드 주제 자동 입력 완료');
                     }
+                  } else if (evt.message.startsWith('TREND_TOPICS_KO:')) {
+                    const ko = evt.message.replace('TREND_TOPICS_KO:','').split('|');
+                    if (ko.length >= 3) {
+                      document.getElementById('topic1-ko').textContent = ko[0].trim();
+                      document.getElementById('topic2-ko').textContent = ko[1].trim();
+                      document.getElementById('topic3-ko').textContent = ko[2].trim();
+                    }
                   } else {
                     appendLog(evt.message);
                   }
