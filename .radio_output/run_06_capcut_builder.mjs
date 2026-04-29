@@ -371,19 +371,32 @@ sceneGroups.forEach((group, gi) => {
 console.log(`  총 씬: ${sceneTimeline.length}개 / 총 재생: ${(TOTAL_US/1e6).toFixed(2)}s`);
 
 // ─── 보조 소재 팩토리 ──────────────────────────────────────────────────────────
-function makeVideoAuxRefs() {
-  const speedId   = newUUID(), phId   = newUUID(), hslId    = newUUID();
-  const canvasId  = newUUID(), animId = newUUID(), scmId    = newUUID();
-  const colorId   = newUUID(), vsId   = newUUID();
+const ZOOM_OUT_ANIM_ID   = '6798332584276267527';
+const ZOOM_OUT_ANIM_PATH = 'C:/Users/채결사/AppData/Local/CapCut/User Data/Cache/effect/6798332584276267527/0c736f993d36a7b1ef00cc73d2ba656f';
+
+function makeVideoAuxRefs(segDurUs) {
+  const speedId      = newUUID(), phId        = newUUID(), hslId   = newUUID();
+  const canvasId     = newUUID(), trackingId  = newUUID(), animId  = newUUID();
+  const scmId        = newUUID(), colorId     = newUUID(), loudId  = newUUID();
+  const vsId         = newUUID();
+  const zoomOutAnim  = {
+    id: ZOOM_OUT_ANIM_ID, type: 'in', start: 0, duration: segDurUs,
+    path: ZOOM_OUT_ANIM_PATH, platform: 'all',
+    resource_id: ZOOM_OUT_ANIM_ID, third_resource_id: ZOOM_OUT_ANIM_ID,
+    source_platform: 1, name: '축소', category_id: 'in_fav', category_name: 'in_fav',
+    panel: 'video', material_type: 'video', anim_adjust_params: null, request_id: '',
+  };
   return {
-    refs: [speedId, phId, hslId, canvasId, animId, scmId, colorId, vsId],
+    refs: [speedId, phId, hslId, canvasId, trackingId, animId, scmId, colorId, loudId, vsId],
     speeds:             [{ id: speedId, type: 'speed', mode: 0, speed: 1, curve_speed: null }],
     placeholder_infos:  [{ id: phId, type: 'placeholder_info', meta_type: 'none', res_path: '', res_text: '', error_path: '', error_text: '' }],
     hsl:                [{ id: hslId, constant_material_id: newUUID(), hsl_color_type: 1, hue: 0, saturation: 0, lightness: 0, interacting: true, version: '1', path: HSL_PATH, type: 'hsl', lumi_hub_path: HSL_LUMI, custom_color: '#FFE64444', resource_id: '', source_platform: 0 }],
     canvases:           [{ id: canvasId, type: 'none', color: '', blur: 0.0625, image: '', album_image: '', image_id: '', image_name: '', source_platform: 0, team_id: '' }],
-    material_animations:[{ id: animId, type: 'sticker_animation', animations: [], multi_language_current: 'none' }],
+    video_trackings:    [{ id: trackingId, type: 'video_tracking', result_path: '', map_path: '', config: { width: 0, height: 0, center_x: 0, center_y: 0, rotation: 0 }, version: '', tracker_type: 0, enable_scale: true, enable_relative_distance: true, tracking_time_range: 0, trackers: [], enable_video_tracking: false }],
+    material_animations:[{ id: animId, type: 'sticker_animation', animations: [zoomOutAnim], multi_language_current: 'none' }],
     sound_channel_mappings: [{ id: scmId, type: '', audio_channel_mapping: 0, is_config_open: false }],
     material_colors:    [{ id: colorId, is_color_clip: false, is_gradient: false, solid_color: '', gradient_colors: [], gradient_percents: [], gradient_angle: 90, width: 0, height: 0 }],
+    loudnesses:         [{ id: loudId }],
     vocal_separations:  [{ id: vsId, type: 'vocal_separation', choice: 0, removed_sounds: [], time_range: null, production_path: '', final_algorithm: '', enter_from: '' }],
   };
 }
@@ -445,10 +458,9 @@ function buildScaleKeyframes(segDurUs) {
   const t0 = Math.round(segDurUs * KF_T0);
   const t1 = Math.round(segDurUs * KF_T1);
   const kf  = (t, v) => ({ id: newUUID(), curveType: 'Line', time_offset: t, left_control: { x: 0, y: 0 }, right_control: { x: 0, y: 0 }, values: [v], string_value: '', graphID: '' });
-  // uniform_scale.on=true 이면 CapCut이 X/Y를 자동 연동 → ScaleX만 있어야 함
-  // ScaleX + ScaleY 둘 다 있으면 lock과 충돌하여 두 키프레임 모두 무시됨
   return [
     { id: newUUID(), material_id: '', property_type: 'KFTypeScaleX', keyframe_list: [kf(t0, 1.0), kf(t1, SCALE_MAX)] },
+    { id: newUUID(), material_id: '', property_type: 'KFTypeScaleY', keyframe_list: [kf(t0, 1.0), kf(t1, SCALE_MAX)] },
   ];
 }
 
@@ -658,7 +670,7 @@ sceneTimeline.forEach((scene, i) => {
   const videoMat = makeVideoMat(i);
   M.videos.push(videoMat);
 
-  const aux      = makeVideoAuxRefs();
+  const aux      = makeVideoAuxRefs(scene._dur);
   addAux(aux);
 
   const isStory    = scene.type !== 'DJ_SHOT';
@@ -934,6 +946,9 @@ function validate(draft) {
   }
   for (const s of videoSegs) {
     const dur = s.target_timerange.duration;
+    const hasScaleX = (s.common_keyframes || []).some(kf => kf.property_type === 'KFTypeScaleX');
+    const hasScaleY = (s.common_keyframes || []).some(kf => kf.property_type === 'KFTypeScaleY');
+    if (hasScaleX && !hasScaleY) errors.push(`[${s.id.slice(0,8)}] KFTypeScaleY 누락`);
     for (const kf of s.common_keyframes || []) {
       if (kf.property_type === 'KFTypeScaleX') {
         const r0 = kf.keyframe_list[0].time_offset / dur;
@@ -1134,11 +1149,14 @@ fs.writeFileSync(OUTPUT_PATH, JSON.stringify(newDraft, null, 2), 'utf-8');
     process.exit(1);
   }
 
-  // 1. 타겟 폴더명 생성 (Radio_EP_YYYYMMDD_HHMMSS)
-  const now = new Date();
-  const pad = (n) => String(n).padStart(2, '0');
-  const stamp = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-  const folderName = `Radio_EP_${stamp}`;
+  // 1. 타겟 폴더명 생성 — 정식(EP_N_youtube)이면 epId 그대로, 테스트면 타임스탬프
+  const isYoutubeEp = /_youtube$/.test(epId);
+  const folderName = isYoutubeEp ? epId : (() => {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const stamp = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    return `Radio_EP_${stamp}`;
+  })();
   const targetDir  = path.join(DRAFTS_DIR, folderName);
   fs.mkdirSync(targetDir, { recursive: true });
 

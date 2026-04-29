@@ -64,7 +64,7 @@ if (fs.existsSync(MASTER_JSON)) {
         lineMaxWidth:      masterMat.line_max_width,
         fixedWidth:        masterMat.fixed_width,
         // 위치/크기 (세그먼트 clip)
-        clip:              masterSeg.clip,
+        clip:              { ...masterSeg.clip, scale: { x: 0.7, y: 0.7 } },
         renderIndex:       masterSeg.render_index,
         trackRenderIndex:  masterSeg.track_render_index,
       };
