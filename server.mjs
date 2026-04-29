@@ -458,16 +458,32 @@ app.post('/api/regenerate-image', async (req, res) => {
     }
   });
 
+  // 디바이스 화면 전면 노출 강화 — 3원칙 주입
+  const DEVICE_RE = /smartphone|tablet|\bphone\b|television|\bTV\b|\bscreen\b|monitor/i;
+  let scenePrompt = scene.visual_prompt_en ?? '';
+  let deviceNegExtra = '';
+  const deviceMatch = scenePrompt.match(/smartphone|tablet|phone|television|TV|screen|monitor/i);
+  if (deviceMatch) {
+    const deviceName = deviceMatch[0];
+    // 원칙 1: 전면 화면 방향 고정
+    const frontScreen = `The character is looking directly at the GLOWING FRONT SCREEN of the ${deviceName}. The character's face is positioned face-to-face with the active screen.`;
+    // 원칙 2: 광원 논리 — 화면 빛이 얼굴에 닿음
+    const lightLogic = `The device's screen is the main light source, casting strong, dynamic light directly onto the character's face.`;
+    scenePrompt = scenePrompt + ` ${frontScreen} ${lightLogic}`;
+    // 원칙 3: 뒷판 네거티브
+    deviceNegExtra = 'NO BACK SIDE of device, NO rear cover, NO device cameras, NO ports or wires on device back, NO phone case';
+  }
+
   parts.push('=== SCENE DESCRIPTION ===');
   if (SCENE_TYPE_STYLE[scene.type]) parts.push(SCENE_TYPE_STYLE[scene.type]);
   if (scene.camera_direction)       parts.push(`Camera framing: ${scene.camera_direction}.`);
   if (scene.japanese_dialogue?.trim()) parts.push(`Emotional moment: "${scene.japanese_dialogue.trim()}"`);
-  parts.push(scene.visual_prompt_en ?? '');
+  parts.push(scenePrompt);
   parts.push('=== END SCENE ===', '');
 
   parts.push('=== STYLE ===', STYLE_BASE, '=== END STYLE ===', '');
   parts.push('=== FORBIDDEN ===', NO_TEXT);
-  const sceneNeg = scene.negative_prompt?.trim() ?? '';
+  const sceneNeg = [scene.negative_prompt?.trim(), deviceNegExtra].filter(Boolean).join(', ');
   parts.push(`Also avoid: ${sceneNeg ? `${sceneNeg}, ` : ''}${GLOBAL_NEG}`);
   parts.push('=== END FORBIDDEN ===');
 

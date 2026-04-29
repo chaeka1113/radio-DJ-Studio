@@ -62,10 +62,38 @@ abstract, photorealistic, 3D render, nsfw, blurry, watermark, western features
 | 발이 땅에 닿음 | `feet firmly on the ground, standing upright` | 발 묘사 없음 + 공중 부유 위험 |
 | 사물 위치 명시 | `cup placed on the table in front of them` | `a cup nearby` |
 
+### 2-A. 디바이스 뒷판 규칙 [15점] ⚠️ CRITICAL
+
+스마트폰·태블릿·TV·사진·편지 등이 등장하는 모든 씬은 **화면/내용을 카메라에 절대 노출하지 않는다.** 카메라에는 기기 뒷판만 보여야 하며, 감정은 캐릭터 표정으로 전달한다.
+
+| 필수 조건 | 올바른 예시 | 잘못된 예시 |
+|---|---|---|
+| 뒷판이 카메라 방향 | `back of device facing camera` | `screen facing camera`, `screen content visible` |
+| 화면 비노출 명시 | `screen not visible to camera` | 화면 내용 묘사 포함 |
+| 감정 대체 전달 | `character reacting emotionally` | 화면 글자·이미지 직접 묘사 |
+
 **감점 기준:**
-- 공중에 뜬 사물이나 비현실적 배치 묘사 발견 시: -15점
-- 상호작용 동사 없이 사물만 언급 시: -10점
-- 물리적 접촉 묘사 완전 누락 시: -5점
+- 화면 내용(screen content, display text 등)이 카메라에 노출되는 묘사: -15점
+- `back of device facing camera` 문구 누락: -8점
+
+**Auto-fix:** 화면 내용 묘사 제거 후 `back of device facing camera, screen not visible to camera, character reacting emotionally` 삽입.
+
+**만점 조건:** 디바이스 씬에 뒷판 노출 + 화면 비노출 명시. 디바이스 미등장 씬은 자동 만점.
+
+### 2-B. 물리적 접촉 묘사 [15점]
+
+캐릭터와 사물의 상호작용이 물리법칙에 따라 **텍스트로 명확히 묘사**되어야 한다.
+
+| 규칙 | 올바른 예시 | 잘못된 예시 (감점) |
+|------|-----------|-----------------|
+| 쥐는 동작 명시 | `physically holding a smartphone firmly in hand` | `with a smartphone` (떠 있는지 불명) |
+| 접촉/연결 명시 | `holding hands tightly, fingers interlocked` | `hands together` |
+| 발이 땅에 닿음 | `feet firmly on the ground, standing upright` | 발 묘사 없음 + 공중 부유 위험 |
+| 사물 위치 명시 | `cup placed on the table in front of them` | `a cup nearby` |
+
+**감점 기준:**
+- 공중에 뜬 사물이나 비현실적 배치 묘사 발견 시: -10점
+- 상호작용 동사 없이 사물만 언급 시: -5점
 
 **만점 조건:** 모든 사물/신체 접촉이 구체적 동사와 위치 정보로 명확히 묘사됨.
 

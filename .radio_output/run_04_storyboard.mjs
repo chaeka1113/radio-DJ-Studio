@@ -133,6 +133,7 @@ Rules:
 - scene types: CHARACTER_SCENE / ESTABLISHING / CLOSE_UP / FLASHBACK
 - visual_prompt_en MUST begin with the character seed above, then describe the scene as a NARRATIVE SENTENCE (not a keyword list). Write "An elderly woman sits at her kitchen table, both hands wrapped around a warm cup of tea. Morning light filters through the window." — NOT "elderly woman, sitting, kitchen, tea cup, morning light".
 - FLASHBACK scenes: immediately after the character seed, insert "younger version of this character in their 20s-30s, youthful face without wrinkles, energetic posture," then continue with narrative scene description
+- 🚨 DEVICE SCREEN RULE (ABSOLUTE): Any scene with smartphone/tablet/phone/TV/screen MUST describe the character looking at the GLOWING FRONT SCREEN face-to-face. Always write "GLOWING FRONT SCREEN of [device]" — NEVER just "[device]". The screen light MUST be described as casting light onto the character's face. NEVER describe or imply the back panel, rear cover, or ports of the device. Violation = immediate Visual QA fail.
 - End every visual_prompt_en with: "Showa retro anime illustration, Studio Ghibli warm palette, masterpiece, best quality, highly detailed, 8k, cinematic, 16:9"
 - speaker format: "NARRATOR (${ep.character.name}・${ep.character.age})"
 
@@ -179,8 +180,8 @@ Output JSON array only:
         s.visual_prompt_en = STYLE_ANCHOR + ' ' + s.visual_prompt_en;
       }
 
-      if (s.type === 'FLASHBACK' && charSeed) {
-        // FLASHBACK: YOUNG_MOD + 나이 앵커 오버라이드 (항상 20s 앵커)
+      if (s.type === 'FLASHBACK' && charSeed && !s.visual_prompt_en.includes('younger version')) {
+        // FLASHBACK: YOUNG_MOD + 나이 앵커 오버라이드 (항상 20s 앵커) — AI가 이미 삽입한 경우 스킵
         const YOUNG_MOD = 'younger version of this character in their 20s-30s, (Young 20s smooth face, no wrinkles, youthful clear skin), energetic posture, ';
         s.visual_prompt_en = s.visual_prompt_en.replace(
           charSeed.trim(),
@@ -196,6 +197,16 @@ Output JSON array only:
             seedTrimmed + ' ' + ageAnchor
           );
         }
+      }
+
+      // ── Visual Anchor 3: Device Front-Screen Rule — 전면 화면 + 빛 논리 + 뒷판 네거티브
+      const deviceMatch = s.visual_prompt_en.match(/smartphone|tablet|\bphone\b|television|\bTV\b|\bscreen\b|monitor/i);
+      if (deviceMatch) {
+        const deviceName = deviceMatch[0];
+        const frontScreen = `The character is looking directly at the GLOWING FRONT SCREEN of the ${deviceName}. The character's face is positioned face-to-face with the active screen.`;
+        const lightLogic  = `The device's screen is the main light source, casting strong, dynamic light directly onto the character's face.`;
+        s.visual_prompt_en = s.visual_prompt_en + ` ${frontScreen} ${lightLogic}`;
+        s.negative_prompt  = [s.negative_prompt, 'NO BACK SIDE of device, NO rear cover, NO device cameras, NO ports or wires on device back, NO phone case'].filter(Boolean).join(', ');
       }
 
       allScenes.push({

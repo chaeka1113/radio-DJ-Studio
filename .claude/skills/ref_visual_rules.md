@@ -57,21 +57,21 @@ type: reference
 
 씬에 스마트폰·태블릿·사진·편지 등을 들고 있는 장면이 포함될 때 반드시 적용:
 
-**핵심 원칙: 화면/사진면은 반드시 그것을 보고 있는 캐릭터 쪽을 향해야 한다. 뒷판이 캐릭터 얼굴 방향으로 오는 구도는 절대 금지.**
-
-카메라 앵글은 정면·측면·POV 모두 허용. 단 어떤 앵글이든 디바이스의 화면면은 캐릭터가 보는 쪽이어야 한다.
+**핵심 원칙: 기기를 보는 장면에서는 반드시 전면 화면(GLOWING FRONT SCREEN)이 캐릭터 얼굴과 마주해야 한다. 화면 빛이 캐릭터 얼굴을 비추는 광원 논리를 항상 포함한다. 뒷판·후면 카메라·포트는 절대 묘사 금지.**
 
 | 상황 | 올바른 프롬프트 예시 |
 |---|---|
-| 스마트폰 보는 장면 | `character holding smartphone with screen facing toward them, screen content visible from character's perspective` |
-| 태블릿 보는 장면 | `character holding tablet with display facing toward character, screen content legible from their viewpoint` |
-| 영상통화 장면 | `video call on tablet/phone screen facing the character, face on screen visible to the character holding it` |
-| 사진·앨범 보는 장면 | `character looking at photograph held with photo side facing them, image visible from their angle` |
+| 스마트폰 보는 장면 | `character looking directly at the GLOWING FRONT SCREEN of the smartphone, face-to-face with active screen, screen light casting onto character's face` |
+| 태블릿 보는 장면 | `character looking directly at the GLOWING FRONT SCREEN of the tablet, face illuminated by screen light` |
+| TV 보는 장면 | `character facing the GLOWING FRONT SCREEN of the television, screen light as main light source casting onto character's face` |
 
-**절대 금지:** 디바이스 뒷판(back panel)이 캐릭터 얼굴 방향으로 오는 구도 — 캐릭터가 뒷판을 보고 있는 것처럼 보이는 모든 구도.
+**절대 금지:** 뒷판(back side), 후면 카메라(rear camera), 방열구, 포트, 폰 케이스 후면 묘사.
 
-**프롬프트 필수 추가 문구 (디바이스·사진 등장 씬 전용):**
-`screen/photo facing toward the character, not showing the back of the device to the character`
+**프롬프트 필수 문구 (디바이스 등장 씬 전용):**
+`GLOWING FRONT SCREEN of [device], face-to-face with active screen, screen is the main light source casting light onto character's face`
+
+**네거티브 프롬프트 필수 추가:**
+`NO BACK SIDE of device, NO rear cover, NO device cameras, NO ports or wires on device back, NO phone case`
 
 ## FLASHBACK 씬 처리 규칙 (핵심)
 씬 타입이 FLASHBACK인 경우, character_seed 직후에 반드시 다음 문구를 삽입:

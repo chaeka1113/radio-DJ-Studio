@@ -145,7 +145,7 @@ if (!isRetry && fs.existsSync(P.scripts)) { fs.rmSync(P.scripts); console.log(` 
 for (const fp of STALE_FILES) {
   if (fs.existsSync(fp)) { fs.rmSync(fp); console.log(`   삭제: ${fp.split('/').pop()}`); }
 }
-for (const d of [P.images, P.videos]) {
+for (const d of [P.images, P.videos, P.audio]) {
   if (fs.existsSync(d)) { fs.rmSync(d, { recursive: true, force: true }); console.log(`   폴더 삭제: ${d.split('/').pop()}/`); }
 }
 console.log('✅ 초기화 완료\n');
