@@ -246,14 +246,14 @@ app.post('/api/generate-scripts', async (req, res) => {
     }
     const qaResult = JSON.parse(fs.readFileSync(P.qaResult, 'utf-8'));
     const qaScore  = typeof qaResult.score === 'number' ? qaResult.score : 100;
-    const qaFailed = qaResult.verdict !== 'Pass' || qaScore < 85;
+    const qaFailed = qaResult.verdict !== 'Pass' || qaScore < 90;
 
     if (!qaFailed) {
       sse.log(`✅ [QA] Pass (${qaScore}/100) — 다음 단계로 진행`);
       qaPass = true;
       break;
     } else {
-      sse.log(`❌ [QA] Fail (${qaScore}/100, 커트라인 85) — ${qaResult.summary ?? ''}`);
+      sse.log(`❌ [QA] Fail (${qaScore}/100, 커트라인 90) — ${qaResult.summary ?? ''}`);
       (qaResult.feedback || []).forEach(f => sse.log(`   ⚠️ ${f}`));
       (qaResult.episodes || [])
         .filter(e => !e.pass)
@@ -268,7 +268,7 @@ app.post('/api/generate-scripts', async (req, res) => {
           fs.writeFileSync(P.qaFeedback, JSON.stringify({
             verdict: 'Fail',
             score: qaScore,
-            cutline: 85,
+            cutline: 90,
             feedback: qaResult.feedback || [],
             episodes: (qaResult.episodes || []).filter(e => !e.pass).map(e => ({
               id: e.id,
@@ -560,6 +560,83 @@ app.post('/api/resume-ep', (req, res) => {
   currentEpId = ep_id;
   console.log(`🔄 EP 복구: ${currentEpId}`);
   res.json({ success: true, ep_id: currentEpId });
+});
+
+// EP 단계 상태 감지 — 어디까지 완료됐는지 반환
+app.get('/api/ep-status/:epId', (req, res) => {
+  const epId = req.params.epId;
+  const P = makePaths(epId);
+  if (!fs.existsSync(P.base)) return res.status(404).json({ error: `EP 없음: ${epId}` });
+
+  const hasFiles = (dir, ext) => {
+    if (!fs.existsSync(dir)) return false;
+    return fs.readdirSync(dir).some(f => f.endsWith(ext));
+  };
+
+  const stages = {
+    scripts:    fs.existsSync(P.scripts),
+    dj:         fs.existsSync(P.djScript),
+    storyboard: fs.existsSync(P.storyboard),
+    images:     hasFiles(P.images, '.png'),
+    audio:      hasFiles(path.join(P.base, 'audio'), '.mp3'),
+  };
+
+  let nextStep = null;
+  if (!stages.scripts)    nextStep = 'scripts';
+  else if (!stages.dj)    nextStep = 'dj';
+  else if (!stages.storyboard) nextStep = 'storyboard';
+  else if (!stages.images)     nextStep = 'images';
+  else if (!stages.audio)      nextStep = 'audio';
+
+  res.json({ epId, stages, nextStep });
+});
+
+// 파이프라인 재개 — fromStep부터 끝까지 순차 실행 (SSE)
+const RESUME_STEP_ORDER = ['dj', 'storyboard', 'images', 'audio'];
+
+app.post('/api/resume-pipeline', async (req, res) => {
+  const { fromStep } = req.body;
+  const sse = sseStream(res);
+
+  const startIdx = RESUME_STEP_ORDER.indexOf(fromStep);
+  if (startIdx === -1) { sse.err(`잘못된 fromStep: ${fromStep}`); return sse.done(1); }
+
+  sse.log(`▶️ [Resume] ${currentEpId ?? '?'} — ${fromStep}부터 재개`);
+
+  for (let i = startIdx; i < RESUME_STEP_ORDER.length; i++) {
+    const step = RESUME_STEP_ORDER[i];
+    let code = 0;
+
+    if (step === 'dj') {
+      sse.log('🎙️ [DJ멘트] 생성 중...');
+      code = await runScript(sse, 'run_02_dj.mjs', []);
+    } else if (step === 'storyboard') {
+      sse.log('🎭 [캐스팅] 생성 중...');
+      code = await runScript(sse, 'run_03_casting.mjs');
+      if (code !== 0) { sse.err('❌ 캐스팅 실패'); return sse.done(code); }
+      sse.log('🎬 [스토리보드] 생성 중...');
+      code = await runScript(sse, 'run_04_storyboard.mjs');
+      if (code !== 0) { sse.err('❌ 스토리보드 실패'); return sse.done(code); }
+      await runScript(sse, 'run_04_visual_QA.mjs');
+      code = 0;
+    } else if (step === 'images') {
+      sse.log('🖼 [이미지] 생성 중...');
+      code = await runScript(sse, 'run_05_images.mjs', []);
+    } else if (step === 'audio') {
+      sse.log('🎧 [TTS] 생성 중...');
+      code = await runScript(sse, 'run_07_audio.mjs', []);
+      if (code !== 0) { sse.err('❌ TTS 실패'); return sse.done(code); }
+      sse.log('🎞 [CapCut] 빌드 중...');
+      await runScript(sse, 'run_06_capcut_builder.mjs');
+      sse.log('💬 [SRT] 자막 생성 중...');
+      await runScript(sse, 'run_08_srt.mjs');
+      code = 0;
+    }
+
+    if (code !== 0) { sse.err(`❌ STEP ${step} 실패 (code ${code})`); return sse.done(code); }
+  }
+
+  sse.done(0);
 });
 
 app.get('/api/data/scripts', (req, res) => {

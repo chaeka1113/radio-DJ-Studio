@@ -11,9 +11,10 @@ description: "[Trigger] 사용자가 /go-radio (또는 /go-radio [주제1] [주�
 
 ## 사용법
 ```
-/go-radio                              ← 트렌드 자동 수집 (주제 생략)
-/go-radio [주제1] [주제2] [주제3]       ← 주제 직접 입력
-/go-radio [주제1] [주제2] [주제3] --qa ← QA 코너 추가
+/go-radio                                              ← 트렌드 자동 수집 (주제 생략)
+/go-radio [주제1] [주제2] [주제3]                       ← 주제 직접 입력
+/go-radio [주제1] [주제2] [주제3] --qa                  ← QA 코너 추가
+/go-radio --from 02 --ep EP_20260502_1800              ← 기존 EP를 특정 스텝부터 재개
 ```
 
 ## 예시
@@ -21,7 +22,22 @@ description: "[Trigger] 사용자가 /go-radio (또는 /go-radio [주제1] [주�
 /go-radio
 /go-radio 健康 老後資金 熟年離婚
 /go-radio 健康 老後資金 熟年離婚 --qa
+/go-radio --from 02 --ep EP_20260502_1800
+/go-radio --from storyboard --ep EP_2_youtube
 ```
+
+## --from 플래그 (파이프라인 재개)
+
+기존 EP의 대본이 이미 생성된 경우 중간 단계부터 이어서 실행한다.
+
+| 값 | 시작 스텝 | 선행 조건 파일 |
+|---|---|---|
+| `02` 또는 `dj` | DJ 멘트 생성 | `01_scripts.json` |
+| `03` 또는 `storyboard` | 캐스팅+스토리보드 | `02_dj_script.json` |
+| `05` 또는 `images` | 이미지 생성 | `04_storyboard.json` |
+| `07` 또는 `audio` | TTS + CapCut | `05_image_results.json` |
+
+`--from` 사용 시 `--ep EP_ID`도 반드시 함께 지정한다.
 
 ---
 
@@ -52,9 +68,16 @@ mkdir -p /c/radio-dj-studio/.output/$EP_ID/{images,audio,videos,capcut}
 이후 모든 단계는 `EP_ID` 환경변수를 참조하거나 `--ep-id $EP_ID` 인수로 전달한다.
 
 **[0-B] 플래그 파싱:**
-`$ARGUMENTS`에서 `--qa` 감지:
-- 포함 → `QA_MODE=true`, 주제는 나머지 인수
-- 미포함 → `QA_MODE=false`
+`$ARGUMENTS`에서 플래그 감지:
+- `--qa` 포함 → `QA_MODE=true`
+- `--from STEP` 포함 → `FROM_STEP=STEP` (값: `02`/`dj`, `03`/`storyboard`, `05`/`images`, `07`/`audio`)
+- `--ep EP_ID` 포함 → `EP_ID=EP_ID` (기존 EP 재사용, `--from`과 함께 사용)
+- `--from` 감지 시: STEP 0-A(EP_ID 생성) 건너뜀, 지정된 EP_ID로 `currentEpId` 설정 → FROM_STEP부터 실행
+
+**[0-B] --from 처리 순서:**
+1. `--ep EP_ID` → `export EP_ID=EP_ID` (기존 디렉토리 사용, 생성 금지)
+2. 선행 조건 파일 존재 확인 (없으면 오류 출력 후 중단)
+3. FROM_STEP에 해당하는 STEP부터 파이프라인 실행
 
 **[0-C] 주제 결정 (2가지 경로):**
 
