@@ -5,10 +5,11 @@ import { loadEnv, requireEnv } from './lib/env.mjs';
 import { generateEpId, makePaths, ensureDirs, updateStage } from './lib/paths.mjs';
 
 loadEnv();
-const epId = process.env.EP_ID ?? generateEpId();
-const P    = makePaths(epId);
+const epId  = process.env.EP_ID ?? generateEpId();
+const P     = makePaths(epId);
 ensureDirs(P);
 const API_KEY = requireEnv('GEMINI_API_KEY');
+const FORCE   = process.argv.includes('--force');
 
 // ── 모델 설정 ─────────────────────────────────────────────────────────────────
 // gemini-2.5-flash-image: 저비용 고품질. imageSize 미지원, aspectRatio만 사용.
@@ -349,11 +350,14 @@ for (let i = 0; i < scenes.length; i++) {
   const scene = scenes[i];
   const filePath = P.images + '/' + scene.scene_id + '.png';
 
-  // 멱등성: 이미 생성된 파일 스킵
-  if (fs.existsSync(filePath)) {
+  // 멱등성: 이미 생성된 파일 스킵 (--force 시 우회)
+  if (!FORCE && fs.existsSync(filePath)) {
     process.stdout.write(`⏭️  [${i+1}/${scenes.length}] ${scene.scene_id} 스킵\n`);
     results.push({ scene_id: scene.scene_id, status: 'skipped', file: filePath });
     continue;
+  }
+  if (FORCE && fs.existsSync(filePath)) {
+    process.stdout.write(`🔄 [${i+1}/${scenes.length}] ${scene.scene_id} 강제 재생성 (--force)\n`);
   }
 
   // ── DNA 결정 ────────────────────────────────────────────────────────────────

@@ -53,32 +53,23 @@ abstract, photorealistic, 3D render, nsfw, blurry, watermark, western features
 
 ## 항목 2 — 물리적 리얼리즘 [배점 30점]
 
-캐릭터와 사물의 상호작용이 물리법칙에 따라 **텍스트로 명확히 묘사**되어야 한다.
+캐릭터와 사물의 상호작용이 물리법칙에 따라 **텍스트로 명확히 묘사**되어야 한다. 세부 기준은 2-A, 2-B 참조.
 
-| 규칙 | 올바른 예시 | 잘못된 예시 (감점) |
-|------|-----------|-----------------|
-| 쥐는 동작 명시 | `physically holding a smartphone firmly in hand` | `with a smartphone` (떠 있는지 불명) |
-| 접촉/연결 명시 | `holding hands tightly, fingers interlocked` | `hands together` |
-| 발이 땅에 닿음 | `feet firmly on the ground, standing upright` | 발 묘사 없음 + 공중 부유 위험 |
-| 사물 위치 명시 | `cup placed on the table in front of them` | `a cup nearby` |
+### 2-A. 디바이스 뒷면 물리 규칙 [15점] ⚠️ CRITICAL
 
-### 2-A. 디바이스 뒷판 규칙 [15점] ⚠️ CRITICAL
+기기 뒷면은 물리적으로 화면이 존재할 수 없다. **카메라 각도와 무관하게, 뒷면에 화면·글씨·이미지가 그려지면 즉시 오류.** 앞면이 카메라에 찍히는 씬(누군가 화면을 보여주는 씬)은 정상 허용.
 
-스마트폰·태블릿·TV·사진·편지 등이 등장하는 모든 씬은 **화면/내용을 카메라에 절대 노출하지 않는다.** 카메라에는 기기 뒷판만 보여야 하며, 감정은 캐릭터 표정으로 전달한다.
-
-| 필수 조건 | 올바른 예시 | 잘못된 예시 |
+| 판정 기준 | 올바른 묘사 | 잘못된 묘사 (감점) |
 |---|---|---|
-| 뒷판이 카메라 방향 | `back of device facing camera` | `screen facing camera`, `screen content visible` |
-| 화면 비노출 명시 | `screen not visible to camera` | 화면 내용 묘사 포함 |
-| 감정 대체 전달 | `character reacting emotionally` | 화면 글자·이미지 직접 묘사 |
+| 뒷면 내용 | `plain matte back cover with camera lenses` | 뒷면에 화면·글씨·이미지 묘사 |
+| 뒷면 발광 | 뒷면 발광 없음 | `glowing back panel`, `rear screen` |
 
 **감점 기준:**
-- 화면 내용(screen content, display text 등)이 카메라에 노출되는 묘사: -15점
-- `back of device facing camera` 문구 누락: -8점
+- 뒷면에 화면 내용(`screen on back panel`, `glowing back`, `rear screen` 등) 묘사 발견 시: -15점
 
-**Auto-fix:** 화면 내용 묘사 제거 후 `back of device facing camera, screen not visible to camera, character reacting emotionally` 삽입.
+**Auto-fix:** 뒷면 화면 묘사 제거 후 `plain matte back panel, no screen on back` 삽입.
 
-**만점 조건:** 디바이스 씬에 뒷판 노출 + 화면 비노출 명시. 디바이스 미등장 씬은 자동 만점.
+**만점 조건:** 뒷면 묘사가 없거나 `plain matte back panel`로만 묘사됨. 기기 미등장 씬은 자동 만점.
 
 ### 2-B. 물리적 접촉 묘사 [15점]
 

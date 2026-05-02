@@ -190,8 +190,10 @@ for (const tsFile of tsFiles) {
       });
     }
     // 다음 세그먼트 오프셋 = 현재 세그먼트 실제 오디오 길이 + 묵음 간격
-    // duration_sec: run_07에서 MP3 버퍼 크기로 계산한 실제 길이 (있으면 사용, 없으면 last timestamp)
-    const segDur = ends.length > 0 ? ends[ends.length - 1] : (seg.duration_sec ?? 0);
+    // duration_sec (파일 크기 기반) 우선 사용 — ElevenLabs last-char 타임스탬프는
+    // trailing silence를 포함하지 않아 실제보다 짧게 측정되므로 드리프트 발생
+    const segDur = (seg.duration_sec > 0 ? seg.duration_sec : null)
+                ?? (ends.length > 0 ? ends[ends.length - 1] : 0);
     segSubOffset += segDur + silenceSec;
   }
 }
@@ -246,13 +248,24 @@ if (subtitles.length > 0)
   subtitles[subtitles.length - 1].end += BREATHING_ROOM_SEC;
 
 // ─── STEP 5: SRT 저장 ────────────────────────────────────────────────────────
-const srtLines = subtitles.map((s, i) => {
-  const endTime = Math.max(s.end, s.start + 0.8);
-  return `${i+1}\n${toSrtTime(s.start)} --> ${toSrtTime(endTime)}\n${s.text}`;
-});
+// 최소 0.8초 보장 적용 후 다시 겹침 제거
+// (겹침 제거 → 최소 길이 강제 → 재겹침 발생하는 구조적 버그 방지)
+const srtEntries = subtitles.map(s => ({
+  start: s.start,
+  text:  s.text,
+  end:   Math.max(s.end, s.start + 0.8),
+}));
+for (let i = 0; i < srtEntries.length - 1; i++) {
+  if (srtEntries[i].end > srtEntries[i + 1].start)
+    srtEntries[i].end = srtEntries[i + 1].start;
+}
+
+const srtLines = srtEntries.map((s, i) =>
+  `${i+1}\n${toSrtTime(s.start)} --> ${toSrtTime(s.end)}\n${s.text}`
+);
 const srtPath = path.join(P.base, 'subtitles.srt');
 fs.writeFileSync(srtPath, srtLines.join('\n\n') + '\n', 'utf-8');
-const totalSec = subtitles.length > 0 ? subtitles[subtitles.length-1].end : 0;
+const totalSec = srtEntries.length > 0 ? srtEntries[srtEntries.length-1].end : 0;
 console.log(`\n✅ SRT 저장 완료 → ${srtPath}`);
 console.log(`   총 ${subtitles.length}개 자막 | 마지막 자막 ${toSrtTime(totalSec)}`);
 
@@ -264,12 +277,11 @@ const newTexts = [];
 const newAnims = [];
 const newSegs  = [];
 
-for (const sub of subtitles) {
+for (const sub of srtEntries) {
   const textId = newUUID();
   const animId = newUUID();
   const segId  = newUUID();
-  const endSec = Math.max(sub.end, sub.start + 0.8);
-  const dur    = endSec - sub.start;
+  const dur    = sub.end - sub.start;
 
   // content JSON (텍스트 + 스타일)
   const contentObj = {
@@ -388,7 +400,7 @@ for (const sub of subtitles) {
   newSegs.push({
     id:               segId,
     source_timerange: null,
-    target_timerange: { start: toUs(sub.start), duration: toUs(dur) },
+    target_timerange: { start: toUs(sub.start), duration: toUs(Math.max(dur, 0)) },
     render_timerange: { start: 0, duration: 0 },
     desc: '', state: 0, speed: 1,
     is_loop: false, is_tone_modify: false, reverse: false,

@@ -28,16 +28,13 @@ You are a Storyboard Director for YouTube long-form radio content.
 
 ## 디바이스·사진 씬 필수 규칙 (CRITICAL)
 
-스마트폰·태블릿·사진 등을 들고 보는 씬의 `visual_prompt_en`에는 반드시 아래 문구를 포함:
+기기·사진이 등장하는 모든 씬에 적용. **카메라 각도와 무관하게 뒷면에는 화면·글씨·이미지가 절대 없다.**
 
-```
-screen/photo facing toward the character, not showing the back of the device to the character
-```
-
-- **핵심**: 화면·사진면은 그것을 보고 있는 캐릭터 쪽을 향해야 함. 뒷판이 캐릭터 얼굴 방향으로 오는 구도 금지.
-- 카메라 앵글은 정면·측면·POV 모두 허용 — 앵글과 무관하게 디바이스 화면이 캐릭터 시선 방향에 있어야 함
-- 영상통화: `video call screen facing toward the character holding it`
-- 사진: `photograph with photo side facing the character looking at it`
+- **캐릭터가 화면을 보는 씬**: `screen facing character, plain matte back panel facing the camera — NO screen on back panel`
+- **화면을 상대방/카메라에 보여주는 씬**: `screen facing toward camera` — 전면 화면 노출 정상
+- **공통 네거티브 필수**: `screen on back panel, display on back cover, glowing back of device, rear screen`
+- 영상통화: `video call screen facing toward the character`
+- 사진: `photo side facing the character looking at it`
 
 ## 참조 규칙 파일
 

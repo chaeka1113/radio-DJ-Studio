@@ -638,7 +638,8 @@ body {
   <button class="sk-btn tiny" onclick="runStep('04')">🎬 03+04 스토리보드</button>
   <button class="sk-btn tiny" onclick="runStep('05', false)">🖼 05 이미지 (없는것만)</button>
   <button class="sk-btn tiny" style="border-color:var(--bad);color:var(--bad);" onclick="runStep('05', true)">🗑🖼 전체 강제재생성</button>
-  <button class="sk-btn tiny" onclick="runStep('07')">🎧 07 TTS</button>
+  <button class="sk-btn tiny" onclick="runStep('07', false)">🎧 07 TTS (없는것만)</button>
+  <button class="sk-btn tiny" style="border-color:var(--bad);color:var(--bad);" onclick="runStep('07', true)">🗑🎧 TTS 전체 강제재생성</button>
   <button class="sk-btn tiny" onclick="runStep('capcut')">🎞 CapCut</button>
 </div>
 
@@ -949,7 +950,7 @@ async function runStep(step, force = false) {
     '02':     ['/api/generate-dj', () => ({ includeQna: document.getElementById('includeQna').checked })],
     '04':     ['/api/generate-storyboard', () => ({})],
     '05':     ['/api/generate-images', () => ({ force })],
-    '07':     ['/api/generate-audio-script', () => ({})],
+    '07':     ['/api/generate-audio-script', () => ({ force })],
     'capcut':   ['/api/generate-capcut', () => ({})],
     'srt':      ['/api/generate-srt', () => ({})],
     'youtube':  ['/api/generate-youtube', () => ({})],

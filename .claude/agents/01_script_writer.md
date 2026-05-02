@@ -14,7 +14,7 @@ TTS 합본(STEP 7) 시 QA 아웃트로 **이후에** 붙이지 말 것.
 ## 참조 규칙 파일
 
 - `ref_script_rules.md` — 대본 작성 규칙 (수치 사실성·서사 구조·테마키지 반응 후크 포함)
-- `ref_script_rubric.md` — QA 채점 기준 (85점 커트라인)
+- `ref_script_rubric.md` — QA 채점 기준 (90점 커트라인)
 - `ref_japan_facts.md` — 일본 실제 가격·연금·시급 수치 데이터
 - `ref_learnings.md` — 누적 오답 노트 (과거 실패 패턴)
 

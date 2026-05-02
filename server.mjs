@@ -333,7 +333,8 @@ app.post('/api/generate-images', (req, res) => {
   }
 
   imageGenRunning = true;
-  runScript(sse, 'run_05_images.mjs')
+  const imgArgs = force ? ['--force'] : [];
+  runScript(sse, 'run_05_images.mjs', imgArgs)
     .then(code => sse.done(code))
     .catch(err => { sse.err(`예외: ${err.message}`); sse.done(1); })
     .finally(() => { imageGenRunning = false; });
@@ -343,7 +344,8 @@ app.post('/api/generate-images', (req, res) => {
 app.post('/api/generate-audio-script', async (req, res) => {
   const sse = sseStream(res);
 
-  const audioCode = await runScript(sse, 'run_07_audio.mjs');
+  const { force: audioForce } = req.body || {};
+  const audioCode = await runScript(sse, 'run_07_audio.mjs', audioForce ? ['--force'] : []);
   if (audioCode !== 0) return sse.done(audioCode);
 
   sse.log('🎬 [CapCut] 프로젝트 빌드 중...');

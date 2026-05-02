@@ -6,10 +6,12 @@
  *   - 하나라도 실패 → 즉시 Fail, Stage 2 생략
  *
  * Stage 2 (LLM, Weighted Rubric — ref_script_rubric.md):
- *   - 항목 1: 계약(Contract) 완벽 이행 [40점]
- *   - 항목 2: V3 오디오 태그 및 지문 규칙 [40점] ← CRITICAL
- *   - 항목 3: 페르소나 및 분량 [20점]
- *   - 커트라인 85점 미만 → Fail + 01_qa_feedback.json에 Actionable Feedback 기록
+ *   - 항목 A: 심리적 뿌리 [25점]
+ *   - 항목 B: 전환점 [25점]
+ *   - 항목 C: 구체적 디테일 + 수치 사실성 [20점]
+ *   - 항목 D: 모순 포인트 [20점] (villain=false → 하위 8점 코드 자동 만점)
+ *   - 항목 E: 계약 이행 (질적) [10점]
+ *   - 커트라인 90점 미만 → Fail + 01_qa_feedback.json에 Actionable Feedback 기록
  *
  * Clean Exit: process.exitCode + IIFE → UV_HANDLE_CLOSING 방지
  */
@@ -157,7 +159,7 @@ ensureDirs(P);
   console.log('✅ [QA Stage 1] 전원 통과 → Stage 2 가중치 루브릭 채점');
 
   // ══════════════════════════════════════════════════════════════════════════
-  // STAGE 2 — 가중치 루브릭 LLM 채점 (ref_script_rubric.md 기반, 커트라인 85점)
+  // STAGE 2 — 가중치 루브릭 LLM 채점 (ref_script_rubric.md 기반, 커트라인 90점)
   // ══════════════════════════════════════════════════════════════════════════
   console.log('📊 [QA Stage 2] 가중치 루브릭 채점 중 (LLM)...');
 
@@ -214,13 +216,32 @@ ${r.script || '(없음)'}
 {
   "episode_id": ${r.id},
   "scores": {
-    "contract_compliance": <0-25>,
-    "v3_audio_tags": <0-35>,
-    "narrative_realism": <0-25>,
-    "length": <0-15>
+    "principle_a": {
+      "score": <0-25>,
+      "evidence": "동기 인용구 (없으면 null)",
+      "deduction": "감점 이유 (없으면 null)"
+    },
+    "principle_b": {
+      "score": <0-25>,
+      "evidence": "전환 장면 인용구 (없으면 null)",
+      "deduction": "감점 이유 (없으면 null)"
+    },
+    "principle_c": {
+      "score": <0-20>,
+      "evidence": ["구체 정보1", "구체 정보2"],
+      "deduction": "감점 이유 (없으면 null)"
+    },
+    "principle_d": {
+      "contradiction_score": <0-12>,
+      "contradiction_evidence": "모순 인용구 (없으면 null)",
+      "villain_behavior_score": <0-8>,
+      "deduction": "감점 이유 (없으면 null)"
+    },
+    "contract": {
+      "score": <0-10>,
+      "deduction": "감점 이유 (없으면 null)"
+    }
   },
-  "total": <0-100>,
-  "verdict": "Pass" | "Fail",
   "deductions": [
     "[항목명] -XX점 감점: 위반 내용"
   ],
@@ -250,17 +271,29 @@ ${r.script || '(없음)'}
           }
         }
         if (scored) {
-          const total = scored.total ?? 100;
-          const verdict = scored.verdict ?? (total >= 85 ? 'Pass' : 'Fail');
+          const s = scored.scores || {};
+          const a = s.principle_a?.score ?? 0;
+          const b = s.principle_b?.score ?? 0;
+          const c = s.principle_c?.score ?? 0;
+          const dContradiction = s.principle_d?.contradiction_score ?? 0;
+          const dVillainRaw = s.principle_d?.villain_behavior_score ?? 0;
+          const isVillainEp = cEp.villain_required === true;
+          // Option 2: code overrides villain_behavior_score to 8 if villain_required=false
+          const dVillain = isVillainEp ? dVillainRaw : 8;
+          const dTotal = dContradiction + dVillain;
+          const e = s.contract?.score ?? 0;
+          const total = a + b + c + dTotal + e;
+          const verdict = total >= 90 ? 'Pass' : 'Fail';
           stage2Results[r.id - 1].score = total;
           stage2Results[r.id - 1].deductions = scored.deductions || [];
           stage2Results[r.id - 1].actionable_feedback = scored.actionable_feedback || [];
-          if (verdict === 'Fail' || total < 85) {
+          stage2Results[r.id - 1].score_breakdown = { a, b, c, d_contradiction: dContradiction, d_villain: dVillain, e, total };
+          if (verdict === 'Fail' || total < 90) {
             stage2Results[r.id - 1].pass = false;
-            console.log(`   ❌ EP${r.id} 루브릭 채점 Fail (${total}/100)`);
+            console.log(`   ❌ EP${r.id} 루브릭 채점 Fail (${total}/100) A${a}+B${b}+C${c}+D${dTotal}+E${e}`);
             (scored.deductions || []).forEach(d => console.log(`      ⚠️ ${d}`));
           } else {
-            console.log(`   ✅ EP${r.id} 루브릭 채점 Pass (${total}/100)`);
+            console.log(`   ✅ EP${r.id} 루브릭 채점 Pass (${total}/100) A${a}+B${b}+C${c}+D${dTotal}+E${e}`);
           }
         } else {
           stage2Results[r.id - 1].pass = false;
@@ -282,7 +315,7 @@ ${r.script || '(없음)'}
     const s2 = stage2Results[i];
     const rubricScore = s2.score ?? 100;
     const allIssues = [...r.issues, ...s2.deductions];
-    const epPass = r.pass && s2.pass && rubricScore >= 85;
+    const epPass = r.pass && s2.pass && rubricScore >= 90;
     return {
       id: r.id,
       pass: epPass,
@@ -325,7 +358,7 @@ ${r.script || '(없음)'}
     const feedbackPayload = {
       verdict: 'Fail',
       score: avgRubricScore,
-      cutline: 85,
+      cutline: 90,
       feedback: failedFeedback,
       episodes: finalEps.filter(e => !e.pass).map(e => ({
         id: e.id,

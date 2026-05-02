@@ -93,8 +93,9 @@ ${reappearCandidates.map(l =>
   }
 
   // 관련 과거 에피소드 — 최근 5화 이내 + 키워드 겹칠 때만
+  // 현재 EP_NUM 자신은 제외 (재생성 시 과거 run 데이터가 오염되는 순환 참조 방지)
   const recentEps = history.episodes
-    .filter(ep => (currentEp - ep.ep_num) <= EPISODE_LOOKBACK)
+    .filter(ep => ep.ep_num !== currentEp && (currentEp - ep.ep_num) <= EPISODE_LOOKBACK)
     .filter(ep =>
       ep.keywords.some(k =>
         thisEpKeywords.some(tk => tk.includes(k) || k.includes(tk))

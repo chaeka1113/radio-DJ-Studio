@@ -71,8 +71,7 @@ DJ 텍스트에 Audio Tag가 2개 이하일 때 `autoInjectDJTags()`가 패턴 �
 | `（笑）` | `[laughs]` |
 | `（苦笑）` | `[chuckles]` |
 | `！！` | `[excited]` |
-| `なんと` | `[surprised]` |
-| `ほほう` `？？` | `[curious]` |
+| `なんと` `？？` `ほほう` | `[surprised]` |
 
 ## 전달 전 체크리스트
 

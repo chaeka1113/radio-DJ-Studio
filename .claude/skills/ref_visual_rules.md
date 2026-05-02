@@ -55,23 +55,45 @@ type: reference
 
 ## 디바이스·사진 화면 방향 규칙 (CRITICAL)
 
-씬에 스마트폰·태블릿·사진·편지 등을 들고 있는 장면이 포함될 때 반드시 적용:
+씬에 스마트폰·태블릿·TV·종이·편지 등이 등장할 때 반드시 적용.
 
-**핵심 원칙: 기기를 보는 장면에서는 반드시 전면 화면(GLOWING FRONT SCREEN)이 캐릭터 얼굴과 마주해야 한다. 화면 빛이 캐릭터 얼굴을 비추는 광원 논리를 항상 포함한다. 뒷판·후면 카메라·포트는 절대 묘사 금지.**
+### 핵심 원칙: 뒷면에는 화면 내용이 없다 (물리 법칙)
 
-| 상황 | 올바른 프롬프트 예시 |
-|---|---|
-| 스마트폰 보는 장면 | `character looking directly at the GLOWING FRONT SCREEN of the smartphone, face-to-face with active screen, screen light casting onto character's face` |
-| 태블릿 보는 장면 | `character looking directly at the GLOWING FRONT SCREEN of the tablet, face illuminated by screen light` |
-| TV 보는 장면 | `character facing the GLOWING FRONT SCREEN of the television, screen light as main light source casting onto character's face` |
+기기 뒷면은 물리적으로 화면이 존재할 수 없다. 카메라 각도와 무관하게, **뒷면에 화면·글씨·이미지가 그려지면 즉시 재생성**.
 
-**절대 금지:** 뒷판(back side), 후면 카메라(rear camera), 방열구, 포트, 폰 케이스 후면 묘사.
+| 면 | 있어도 되는 것 | 절대 금지 |
+|---|---|---|
+| **앞면 (전면)** | 화면·디스플레이·빛·내용물 | — |
+| **뒷면 (후면)** | 무광 커버 + 카메라 렌즈만 | **화면·디스플레이·발광·글씨·이미지 일체** |
 
-**프롬프트 필수 문구 (디바이스 등장 씬 전용):**
-`GLOWING FRONT SCREEN of [device], face-to-face with active screen, screen is the main light source casting light onto character's face`
+---
 
-**네거티브 프롬프트 필수 추가:**
-`NO BACK SIDE of device, NO rear cover, NO device cameras, NO ports or wires on device back, NO phone case`
+### Case A — 캐릭터가 화면을 보는 씬 (카메라에 뒷면이 찍힘)
+캐릭터가 기기를 들고 화면을 보고 있는 경우. 뒷면이 자연스럽게 카메라 방향이 됨.
+
+- 프롬프트: `character looking at the [device] screen (screen facing character), plain matte back panel with only small circular camera lenses visible to camera — absolutely NO screen or display on the back panel`
+- 네거티브: `screen on back panel, display on back cover, rear screen, glowing back of device`
+
+### Case B — 캐릭터에게 화면을 보여주는 씬 (카메라에 앞면이 찍힘)
+다른 사람 또는 캐릭터 스스로 화면을 카메라/상대방 쪽으로 향하는 경우. 전면 화면이 카메라에 보이는 것은 정상.
+
+- 프롬프트: `[device] screen facing toward the character and camera, glowing front display visible`
+- 네거티브: `screen on back panel, rear display, glowing back panel`
+
+---
+
+### 기기별 뒷면 묘사 가이드
+
+| 기기 | 뒷면 올바른 묘사 | 절대 금지 |
+|---|---|---|
+| 스마트폰 | `plain matte back cover with 1-2 small circular camera lenses` | 화면, 발광, 투명 패널 |
+| 태블릿 | `flat matte back panel, no screen` | 화면, 디스플레이 |
+| TV | `back of TV set with cables and vents` | 화면, 발광 |
+| 종이·편지 | `blank white back of paper` | 글씨, 그림 |
+| 사진 | `plain white back of photograph` | 이미지, 발광 |
+
+**모든 디바이스 등장 씬 네거티브 프롬프트 필수 추가:**
+`screen on back of device, display on back panel, rear screen, glowing back panel, back panel with display`
 
 ## FLASHBACK 씬 처리 규칙 (핵심)
 씬 타입이 FLASHBACK인 경우, character_seed 직후에 반드시 다음 문구를 삽입:

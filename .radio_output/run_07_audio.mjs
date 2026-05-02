@@ -16,9 +16,10 @@ const __filename_audio = fileURLToPath(import.meta.url);
 const __dirname_audio  = path.dirname(__filename_audio);
 const historyPath      = path.join(__dirname_audio, 'ref_broadcast_history.json');
 
-// process.argv에서 --ep 파싱
+// process.argv에서 --ep, --force 파싱
 const epArgIdx = process.argv.indexOf('--ep');
 const EP_NUM   = epArgIdx !== -1 ? parseInt(process.argv[epArgIdx + 1]) : null;
+const FORCE    = process.argv.includes('--force');
 
 // ── FFmpeg 가용성 체크 & 전역 묵음 파일 생성 ──────────────────────────────────
 const SILENCE_SEC = 1.5; // 세그먼트 간 묵음 (초)
@@ -497,8 +498,8 @@ for (const chunk of audioChunks) {
   const outPath       = path.join(audioDir, `${chunk.id}.mp3`);
   const tsPath        = path.join(audioDir, `${chunk.id}_timestamps.json`);
 
-  // [CRITICAL 멱등성] MP3 + _timestamps.json 둘 다 존재할 때만 스킵
-  if (fs.existsSync(outPath) && fs.existsSync(tsPath)) {
+  // [CRITICAL 멱등성] MP3 + _timestamps.json 둘 다 존재할 때만 스킵 (--force 시 우회)
+  if (!FORCE && fs.existsSync(outPath) && fs.existsSync(tsPath)) {
     const sizeKB = parseFloat((fs.statSync(outPath).size / 1024).toFixed(1));
     console.log(`⏭  ${chunk.id}.mp3 스킵 (MP3 + timestamps.json 이미 존재, ${sizeKB} KB)`);
     manifest.chunks.push({
@@ -511,6 +512,9 @@ for (const chunk of audioChunks) {
       skipped: true,
     });
     continue;
+  }
+  if (FORCE && fs.existsSync(outPath)) {
+    console.log(`🔄 ${chunk.id}.mp3 강제 재생성 (--force)`);
   }
 
   const { merged, alignments, silenceSec } = await processChunk(chunk);
@@ -650,8 +654,12 @@ async function updateBroadcastHistory(epNum) {
     })(),
   };
 
-  // 재생성 시 기존 EP_NUM 리스너 제거 후 새로 추가
-  history.listeners = history.listeners.filter(l => l.first_appeared !== epNum);
+  // 재생성 시 리스너 처리:
+  // - 이번 EP에만 등장(first===last===epNum)한 리스너만 제거 (후속 EP 재등장 기록 보존)
+  // - 이름 기준으로 업데이트 or 신규 추가
+  history.listeners = history.listeners.filter(
+    l => !(l.first_appeared === epNum && l.last_appeared === epNum)
+  );
   const newListeners = (scripts?.episodes || []).map(ep => ({
     name: ep.character?.name || '不明',
     age: parseInt(ep.character?.age) || 60,
@@ -665,7 +673,12 @@ async function updateBroadcastHistory(epNum) {
   for (const newL of newListeners) {
     const existing = history.listeners.find(l => l.name === newL.name);
     if (existing) {
-      existing.last_appeared = epNum;
+      // 재등장 기록(last_appeared)이 현재 EP 이후이면 유지, 아니면 현재로 갱신
+      if (existing.last_appeared <= epNum) existing.last_appeared = epNum;
+      // 프로필은 최신 run 데이터로 갱신
+      existing.profile  = newL.profile;
+      existing.outcome  = newL.outcome;
+      existing.keywords = newL.keywords;
     } else {
       history.listeners.push(newL);
     }

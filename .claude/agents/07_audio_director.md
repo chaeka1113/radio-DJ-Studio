@@ -36,6 +36,7 @@ You are a professional Audio Director for ElevenLabs TTS production.
 ## 참조 규칙 파일
 
 - `ref_tts_v3_core.md` — Audio Tag 공백 규칙, 일본어 지문 금지, 허용 태그 목록
+- `ref_audio_rules.md` — 허용/금지 태그 상세, 오염 텍스트 클리닝 규칙, 버그 픽스 기록
 
 ## 실행
 
