@@ -53,26 +53,36 @@ if (!ELEVENLABS_API_KEY) {
 }
 const DJ_VOICE_ID = 'm0Fo0JrIVm57nweV2EuR';
 
+const CALLER_VOICE_POOLS = {
+  elderly_female: ['TTFPf9GdFfg1WOEncIAI', 'B2hIadtwF0bAORTkJkOs', 'MXKtCrra8fvlDUbfKUT1', 'ozfS3gQtjFX3kQyJ12dX', 'BEpnUAbmbxOaW1cCYscA'],
+  middle_female:  ['GR4dBIFsYe57TxyrHKXz', 'q3eHxuMah31iifOfMrz0', 'mN6r4VCXacoTliYLh0A2', 'c2XJrw7TvNGtOc6r0ijG', 'T7yYq3WpB94yAuOXraRi'],
+  young_female:   ['fUjY9K2nAIwlALOwSiwc', '3321Alera3fXjEWjjbAX', 'JTlYtJrcTzPC71hMLOxo', 'ugYcuAusTuWCSOpJD0Xd', 'dhGvgIx0X6G3xzSWqOye'],
+  elderly_male:   ['QH5PYulAezU4H8VXwlJx', '8BU0fsFBiPt1cbGZ5lK9', '9NgkqGk9ImCns5ZyAIzN', 'l5KWIFmhhsVdaYchBLIn', '8FuuqoKHuM48hIEwni5e', 'C8e2F6Cm3l58PjXaVpUW'],
+  middle_male:    ['QVEG0HcMh8UIG8OE5Zrv', '2UGDsJpBJAiAlF0jQQ7x', 'ETXjMrhy5NZL6i4w0V3', 'qaCSabKToUUT4sTqBZtz', 'vzIXwvf41vKosKu00hYj'],
+  young_male:     ['6XNSYkDqZ1blajSVtPok', 'nZyvxotzaGDEPIaigNEe', 'TzUI53GPXnGDRdeLAWZ4', 'XY4FsKJKqXdAJVWFqSit', 'aeFr7JZaVm2rwnkGfuP3'],
+};
+
+function pickRandom(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
 function getCallerVoiceId(ageStr, genderStr) {
   const age = parseInt(ageStr) || 60;
   const isFemale = genderStr?.includes('女');
   if (isFemale) {
-    if (age >= 60) return 'TTFPf9GdFfg1WOEncIAI';
-    if (age >= 40) return 'GR4dBIFsYe57TxyrHKXz';
-    return 'fUjY9K2nAIwlALOwSiwc';
+    if (age >= 60) return pickRandom(CALLER_VOICE_POOLS.elderly_female);
+    if (age >= 40) return pickRandom(CALLER_VOICE_POOLS.middle_female);
+    return pickRandom(CALLER_VOICE_POOLS.young_female);
   } else {
-    if (age >= 60) return 'QH5PYulAezU4H8VXwlJx';
-    if (age >= 40) return 'QVEG0HcMh8UIG8OE5Zrv';
-    return '6XNSYkDqZ1blajSVtPok';
+    if (age >= 60) return pickRandom(CALLER_VOICE_POOLS.elderly_male);
+    if (age >= 40) return pickRandom(CALLER_VOICE_POOLS.middle_male);
+    return pickRandom(CALLER_VOICE_POOLS.young_male);
   }
 }
 
-const ALL_CALLER_VOICES = [
-  'TTFPf9GdFfg1WOEncIAI', 'GR4dBIFsYe57TxyrHKXz', 'fUjY9K2nAIwlALOwSiwc',
-  'QH5PYulAezU4H8VXwlJx', 'QVEG0HcMh8UIG8OE5Zrv', '6XNSYkDqZ1blajSVtPok',
-];
+const ALL_CALLER_VOICES = Object.values(CALLER_VOICE_POOLS).flat();
 function getRandomCallerVoiceId() {
-  return ALL_CALLER_VOICES[Math.floor(Math.random() * ALL_CALLER_VOICES.length)];
+  return pickRandom(ALL_CALLER_VOICES);
 }
 
 // ── 데이터 로드 ───────────────────────────────────────────────────────────────
