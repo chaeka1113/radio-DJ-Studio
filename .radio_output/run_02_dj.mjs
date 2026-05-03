@@ -1,7 +1,7 @@
 /**
  * run_02_dj.mjs  — テンキ爺 DJ 멘트 생성
  * 엔진: Gemini 2.5 Pro (thinking budget 활성화)
- * 특징: 사연 전문 기반 유기적 반응 / villain·MZ 전용 리액션 / 최근 3EP 어휘 제한
+ * 구조: EP별 dj_reaction 3회 개별 호출 → show_opening/closing 1회 호출 → 병합
  */
 
 import { GoogleGenAI } from '@google/genai';
@@ -17,11 +17,10 @@ const epId = process.env.EP_ID ?? generateEpId();
 const P    = makePaths(epId);
 ensureDirs(P);
 
-const includeQna = process.argv.includes('--qna');
 const GEMINI_KEY = requireEnv('GEMINI_API_KEY');
 const ai = new GoogleGenAI({ apiKey: GEMINI_KEY });
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __dirname      = path.dirname(fileURLToPath(import.meta.url));
 const VOCAB_LOG_PATH = path.join(__dirname, 'ref_dj_vocab_log.json');
 
 // ── 입력 파일 로드 ────────────────────────────────────────────────────────────
@@ -32,16 +31,13 @@ if (episodes.length < 3) {
   process.exit(1);
 }
 
-// 에피소드 계약서 (villain / mz 플래그)
 let contract = null;
-if (fs.existsSync(P.episodeContract)) {
-  contract = JSON.parse(fs.readFileSync(P.episodeContract, 'utf-8'));
+if (fs.existsSync(P.epContract)) {
+  contract = JSON.parse(fs.readFileSync(P.epContract, 'utf-8'));
 }
 
-// ref_persona_rules.md 로드
 const personaRules = fs.readFileSync(P.refPersona, 'utf-8');
 
-// 어휘 로그 (최근 3EP 금지 표현)
 let vocabLog = { recent_eps: [] };
 if (fs.existsSync(VOCAB_LOG_PATH)) {
   try { vocabLog = JSON.parse(fs.readFileSync(VOCAB_LOG_PATH, 'utf-8')); } catch (_) {}
@@ -49,7 +45,7 @@ if (fs.existsSync(VOCAB_LOG_PATH)) {
 const recentExprs = vocabLog.recent_eps
   .slice(-3)
   .flatMap(ep => ep.expressions ?? [])
-  .filter((v, i, a) => a.indexOf(v) === i); // 중복 제거
+  .filter((v, i, a) => a.indexOf(v) === i);
 
 // ── 도쿄 실시간 날씨 ─────────────────────────────────────────────────────────
 async function fetchTokyoWeather() {
@@ -63,8 +59,8 @@ async function fetchTokyoWeather() {
     const res  = await fetch(url, { signal: AbortSignal.timeout(5000) });
     const json = await res.json();
     return `東京 現在気温${json.current?.temperature_2m}℃ / ${WMO[json.current?.weathercode] ?? '不明'}`;
-  } catch (err) {
-    console.warn(`   ⚠️  날씨 API 실패 → 기본값`);
+  } catch {
+    console.warn('   ⚠️  날씨 API 실패 → 기본값');
     return '東京 深夜の気温不明 / 電波状態が悪い';
   }
 }
@@ -73,7 +69,7 @@ console.log('🌤  도쿄 실시간 날씨 취득 중...');
 const realTimeWeather = await fetchTokyoWeather();
 console.log(`   📡 ${realTimeWeather}`);
 
-// ── 에피소드별 컨텍스트 빌드 ─────────────────────────────────────────────────
+// ── 에피소드 컨텍스트 빌드 ────────────────────────────────────────────────────
 function buildEpContext(ep) {
   const contractEp = contract?.episodes?.find(c => c.id === ep.id);
   const isVillain   = contractEp?.villain_required ?? false;
@@ -87,8 +83,8 @@ function buildEpContext(ep) {
     theme:    ep.theme,
     title:    ep.title,
     name:     ep.character?.name ?? '',
-    age:      age,
-    script:   ep.script ?? '',        // 사연 전문
+    age,
+    script:   ep.script ?? '',
     isVillain,
     isMZ:     isMZ || isMZByAge,
   };
@@ -96,29 +92,11 @@ function buildEpContext(ep) {
 
 const epContexts = episodes.slice(0, 3).map(buildEpContext);
 
-// ── QA 지시문 ─────────────────────────────────────────────────────────────────
-const QNA_INSTRUCTION = includeQna ? `
-
-【Q&Aコーナー】
-3本のエピソードメントの後に、リスナーからのQ&Aコーナーを追加せよ。
-リスナーからのバカバカしい・あり得ない質問3つ + テンキ爺の毒舌一言回答（各60文字以内）。
-質問・回答はすべて日本語のみ。韓国語・英語は一切混入禁止。
-JSONに追加:
-"qa_segment": {
-  "intro": "Q&Aコーナーのイントロメント（日本語）",
-  "pairs": [
-    {"q":"질문1（日本語）","a":"답변1（日本語）"},
-    {"q":"질문2（日本語）","a":"답변2（日本語）"},
-    {"q":"질문3（日本語）","a":"답변3（日本語）"}
-  ]
-}` : '';
-
-// ── 금지 표현 목록 ────────────────────────────────────────────────────────────
+// ── 공통 블록 ─────────────────────────────────────────────────────────────────
 const forbiddenBlock = recentExprs.length > 0
   ? `\n【이번 EP 사용 금지 표현 — 최근 3EP 중복 방지】\n${recentExprs.map(e => `・${e}`).join('\n')}\n위 표현은 이번 EP에서 사용하지 말 것. ただし ポンコツ/ガラクタ/バカ野郎 등 핵심 캐릭터 어휘는 예외.\n`
   : '';
 
-// ── 에피소드별 특수 이벤트 지시 ───────────────────────────────────────────────
 function buildSpecialInstruction(ctx) {
   const lines = [];
   if (ctx.isMZ) {
@@ -132,109 +110,43 @@ function buildSpecialInstruction(ctx) {
   return lines.join('\n');
 }
 
-const specialInstructions = epContexts.map(buildSpecialInstruction).filter(Boolean).join('\n');
+// ── Gemini 공통 설정 ──────────────────────────────────────────────────────────
+const GEMINI_CONFIG = {
+  temperature:     1.0,
+  maxOutputTokens: 8192,
+  thinkingConfig:  { thinkingBudget: 8000 },
+};
 
-// ── System Instruction (페르소나 고정) ───────────────────────────────────────
-const SYSTEM_INSTRUCTION = `${personaRules}
+// ── 재시도 래퍼 ───────────────────────────────────────────────────────────────
+async function withRetry(fn, label, maxRetry = 3) {
+  let lastErr;
+  for (let attempt = 0; attempt < maxRetry; attempt++) {
+    try {
+      return await fn(attempt);
+    } catch (err) {
+      lastErr = err;
+      console.warn(`⚠️  ${label} 재시도 ${attempt + 1}/${maxRetry}: ${err.message?.slice(0, 120)}`);
+      if (attempt < maxRetry - 1) await new Promise(r => setTimeout(r, 4000 * (attempt + 1)));
+    }
+  }
+  throw lastErr;
+}
 
----
-あなたはテンキ爺（てんきじい）だ。上記のペルソナルールに従い、사연에 유기적으로 반응하라.
-사연 전문을 반드시 읽고, 구체적인 디테일(이름·나이·사건)을 직접 언급하며 반응할 것.
-매 EP마다 다른 흐름, 다른 감정 온도로 반응하라 — 공식처럼 반복하지 말 것.`;
-
-// ── User 메시지 (동적 컨텍스트) ──────────────────────────────────────────────
-const userMessage = `
-【오늘 도쿄 날씨】${realTimeWeather}
-show_opening에서 이 날씨 정보를 활용해 도쿄 스튜디오 애드립을 넣어라.
-${forbiddenBlock}
-${specialInstructions ? `【특수 이벤트 지시】\n${specialInstructions}\n` : ''}
-【오늘 사연 3편 전문】
-
-▶ EP1: 「${epContexts[0].theme}」/ "${epContexts[0].title}"
-사연자: ${epContexts[0].name}(${epContexts[0].age})
-───────────────────────
-${epContexts[0].script}
-───────────────────────
-
-▶ EP2: 「${epContexts[1].theme}」/ "${epContexts[1].title}"
-사연자: ${epContexts[1].name}(${epContexts[1].age})
-───────────────────────
-${epContexts[1].script}
-───────────────────────
-
-▶ EP3: 「${epContexts[2].theme}」/ "${epContexts[2].title}"
-사연자: ${epContexts[2].name}(${epContexts[2].age})
-───────────────────────
-${epContexts[2].script}
-───────────────────────
-
-【생성할 멘트 & 분량】
-▶ show_opening (150〜200文字): 「電波泥棒ども」로 시작, 도쿄 날씨를 비유로 연결 (단순 날씨 보고 금지)
-▶ episodes[1].dj_reaction (350〜500文字): 사연 구체적 디테일 직접 언급, 돌려까기 패턴 1개 이상 포함
-▶ episodes[1].dj_transition (100〜150文字): 다음 EP 직접 소개 금지, 감정 여운으로 자연 연결
-▶ episodes[2].dj_reaction (350〜500文字): 위와 동일
-▶ episodes[2].dj_transition (100〜150文字): 위와 동일
-▶ episodes[3].dj_reaction (350〜500文字): 위와 동일
-▶ show_closing (300〜400文字): 오늘 3편 관통하는 팩트 하나로 정리, 구독 요청은 귀찮은 척 강요
-
-【품질 체크리스트 — 생성 전 반드시 확인】
-□ dj_reaction 첫 문장: 사연자 이름·구체적 상황 직접 언급 (では/さて/今回は 시작 금지)
-□ dj_reaction 중반: 自虐型·伏線型·第三者型 돌려까기 패턴 1개 이상
-□ dj_reaction 마지막: 로봇 자기비하 키워드 포함 + 짧고 단호한 츤데레 마무리
-□ show_opening: 날씨를 비유·감정으로 연결 (기온·날씨 단순 보고 금지)
-□ dj_transition: 다음 EP 직접 소개 금지, 감정 여운 흐름으로 연결
-□ show_closing: 3편 나열 recap 금지, 관통 팩트 하나 + 귀찮은 척 구독 요청
-${QNA_INSTRUCTION}
-
-【출력: JSON만 반환, 설명 없음】
-{
-  "show_opening": "...",
-  "episodes": [
-    {"id":1,"dj_reaction":"...","dj_transition":"..."},
-    {"id":2,"dj_reaction":"...","dj_transition":"..."},
-    {"id":3,"dj_reaction":"...","dj_transition":null}
-  ],
-  "show_closing": "...",
-  "used_expressions": ["이번 EP에서 사용한 특징적 표현 5〜10개 (어휘 로그용)"]${includeQna ? `,
-  "qa_segment": {
-    "intro": "...",
-    "pairs": [
-      {"q":"...","a":"..."},
-      {"q":"...","a":"..."},
-      {"q":"...","a":"..."}
-    ]
-  }` : ''}
-}`;
-
-// ── 페르소나 규칙 검증 함수 ───────────────────────────────────────────────────
-// 반환: { lengthViolations: string[], ruleViolations: string[] }
-// 분량과 규칙 위반을 분리하여 재시도 피드백 품질과 폴백 로직을 개선한다.
-function validateDjMents(parsed) {
+// ── 검증: EP별 dj_reaction ───────────────────────────────────────────────────
+function validateEpReaction(parsed, ctx) {
   const lengthViolations = [];
   const ruleViolations   = [];
+  const reaction   = parsed.dj_reaction   ?? '';
+  const transition = parsed.dj_transition ?? '';
+  const allText    = reaction + '\n' + transition;
 
-  const opening     = parsed.show_opening ?? '';
-  const closing     = parsed.show_closing ?? '';
-  const eps         = parsed.episodes     ?? [];
-  const reactions   = eps.map(e => e.dj_reaction   ?? '');
-  const transitions = eps.slice(0, 2).map(e => e.dj_transition ?? '');
-  const allText     = [opening, closing, ...reactions, ...transitions].join('\n');
+  if (reaction.length < 500 || reaction.length > 700)
+    lengthViolations.push(`dj_reaction ${reaction.length}字 (허용: 500~700字)`);
+  if (ctx.id < 3 && transition) {
+    if (transition.length < 80 || transition.length > 130)
+      lengthViolations.push(`dj_transition ${transition.length}字 (허용: 80~130字)`);
+  }
 
-  // ── 분량 체크 (lengthViolations) ────────────────────────────────────────────
-  if (opening.length < 150 || opening.length > 200)
-    lengthViolations.push(`show_opening ${opening.length}字 (허용: 150~200字)`);
-  if (closing.length < 300 || closing.length > 400)
-    lengthViolations.push(`show_closing ${closing.length}字 (허용: 300~400字)`);
-  reactions.forEach((r, i) => {
-    if (r.length < 350 || r.length > 500)
-      lengthViolations.push(`EP${i+1} dj_reaction ${r.length}字 (허용: 350~500字)`);
-  });
-  transitions.forEach((t, i) => {
-    if (t.length < 100 || t.length > 150)
-      lengthViolations.push(`EP${i+1} dj_transition ${t.length}字 (허용: 100~150字)`);
-  });
-
-  // ── 규칙 위반 체크 (ruleViolations) ─────────────────────────────────────────
   if (/ジジジ|ガガッ|ブーン|ギギギ|ザザッ/.test(allText))
     ruleViolations.push('금지 의성어 포함: ジジジ/ガガッ/ブーン 등');
   if (/\[[ぁ-ん一-龯ァ-ン]{1,6}\]/.test(allText))
@@ -253,177 +165,269 @@ function validateDjMents(parsed) {
   return { lengthViolations, ruleViolations };
 }
 
-// ── 분량 실패에 대한 구체적 확장/축소 힌트 생성 ──────────────────────────────
-// 단순히 "더 길게 써" 대신 어떤 방향으로 보완할지 모델에게 알려준다.
-function buildLengthFeedback(lengthViolations, epContexts) {
-  return lengthViolations.map(v => {
-    const len = parseInt(v.match(/(\d+)字/)?.[1] ?? '0');
+// ── 검증: show_opening + show_closing ───────────────────────────────────────
+function validateOpeningClosing(parsed) {
+  const lengthViolations = [];
+  const ruleViolations   = [];
+  const opening = parsed.show_opening ?? '';
+  const closing = parsed.show_closing ?? '';
+  const allText = opening + '\n' + closing;
 
-    // EP dj_reaction
-    const reactionMatch = v.match(/EP(\d+) dj_reaction/);
-    if (reactionMatch) {
-      const epNum = parseInt(reactionMatch[1]);
-      const ctx   = epContexts.find(e => e.id === epNum) ?? {};
-      const shortage = 350 - len;
-      if (shortage > 0) {
-        return `[분량 부족] ${v}\n` +
-          `   → ${shortage}字 이상 추가 필요. 다음 중 선택:\n` +
-          `   ① 사연자 ${ctx.name ?? ''}(${ctx.age ?? ''})의 구체적 대사·행동을 인용하며 テンキ爺 팩트 직격탄 전개\n` +
-          `   ② ポンコツ/8ビット/256KB 자기비하 비유 한 마디 삽입 후 독설 이어가기\n` +
-          `   ③ 츤데레 마무리 전 한 호흡 — 침묵(...)후 "まあ、" 로 전환하는 위로 1문장 추가`;
-      } else {
-        return `[분량 초과] ${v}\n` +
-          `   → 반복되거나 의미가 겹치는 문장 1~2개를 제거하세요. 독설의 핵심 1줄은 반드시 유지.`;
-      }
-    }
+  if (opening.length < 150 || opening.length > 200)
+    lengthViolations.push(`show_opening ${opening.length}字 (허용: 150~200字)`);
+  if (closing.length < 400 || closing.length > 550)
+    lengthViolations.push(`show_closing ${closing.length}字 (허용: 400~550字)`);
 
-    // dj_transition
-    const transMatch = v.match(/EP(\d+) dj_transition/);
-    if (transMatch) {
-      if (len < 100) {
-        return `[분량 부족] ${v}\n` +
-          `   → 다음 EP 테마를 살짝 암시하는 한 마디를 덧붙이세요 (예: "次はまた別の話だ、")`;
-      } else {
-        return `[분량 초과] ${v}\n` +
-          `   → 트랜지션은 짧게. 다음 EP로 넘어가는 핵심 문장 하나만 남기세요.`;
-      }
-    }
+  if (/ジジジ|ガガッ|ブーン|ギギギ|ザザッ/.test(allText))
+    ruleViolations.push('금지 의성어 포함');
+  if (/\[[ぁ-ん一-龯ァ-ン]{1,6}\]/.test(allText))
+    ruleViolations.push('일본어 대괄호 지문 포함');
+  if (/（[^）]{1,20}）/.test(allText))
+    ruleViolations.push('일본어 괄호 행동묘사 포함');
+  if (/<break\s/.test(allText))
+    ruleViolations.push('SSML 태그 포함');
+  if (/次回は|来週は|次の放送では|次のエピソード/.test(allText))
+    ruleViolations.push('次回予告 금지');
+  if (/\b(私|僕|俺)\b/.test(allText))
+    ruleViolations.push('1인칭 오류: 私/僕/俺 → ワシ');
 
-    // show_opening
-    if (v.includes('show_opening')) {
-      if (len < 150) return `[분량 부족] ${v}\n   → 날씨 정보를 더 구체적으로 활용하거나, 오늘 밤 방송 예고를 한 마디 더 추가하세요.`;
-      return `[분량 초과] ${v}\n   → 오프닝은 짧고 임팩트 있게. 날씨 언급 + 예고 2문장 이내로 줄이세요.`;
-    }
-
-    // show_closing
-    if (v.includes('show_closing')) {
-      if (len < 300) return `[분량 부족] ${v}\n   → 유튜브 구독 요청을 조금 더 풀거나, 오늘 방송 전체를 テンキ爺 특유의 독백으로 정리하는 1~2문장을 추가하세요.`;
-      return `[분량 초과] ${v}\n   → 엔딩이 너무 깁니다. 구독 요청 + 마무리 독백 조합으로 핵심만 남기세요.`;
-    }
-
-    return `[분량] ${v}`;
-  }).join('\n');
+  return { lengthViolations, ruleViolations };
 }
 
-// ── Gemini 2.5 Pro 호출 ───────────────────────────────────────────────────────
-console.log('🎙️  テンキ爺 DJ 멘트 생성 중 (Gemini 2.5 Pro + thinking)...');
+// ── 호출 1~3: EP별 dj_reaction 개별 생성 ─────────────────────────────────────
+async function generateEpReaction(ctx) {
+  const specialInstruction = buildSpecialInstruction(ctx);
+  const isLastEp = ctx.id === 3;
 
-let djMents;
-let retryCount   = 0;
-let retryFeedback = '';
-// 규칙 위반이 없는 최선 시도를 추적 — 재시도 소진 시 분량 편차만 있는 결과를 폴백으로 사용
-let bestAttempt  = null; // { parsed, ruleViolations, lengthViolations }
+  const SYSTEM = `${personaRules}
 
-while (retryCount < 3) {
-  try {
-    const retryPrefix = retryFeedback
+---
+あなたはテンキ爺だ。以下の一つの投稿に集中して反応しろ。
+페르소나 규칙에 따라 유기적으로 반응하라.
+---`;
+
+  const USER = `【오늘 도쿄 날씨】${realTimeWeather}
+${forbiddenBlock}${specialInstruction ? `【특수 이벤트 지시】\n${specialInstruction}\n` : ''}
+▶ EP${ctx.id}: 「${ctx.theme}」/ "${ctx.title}"
+사연자: ${ctx.name}(${ctx.age})
+───────────────────────
+${ctx.script}
+───────────────────────
+
+이 사연의 dj_reaction을 쓰기 전에 아래 두 가지를 먼저 파악하라.
+출력에 포함하지 않아도 된다. 생성 방향을 잡기 위한 것이다.
+
+  - 이 사연자의 행동 중 가장 모순되거나 어이없는 포인트가 무엇인가
+  - 이 모순을 テンキ爺의 기계 시점으로 해석하면 어떤 비유가 가장 잘 맞는가
+
+파악이 끝나면 아래 방식으로 써라.
+
+  첫 문장: 사연자 이름이나 가장 날카로운 디테일로 바로 시작.
+  「では」「さて」「今回は」금지.
+
+  전개: 파악한 비유를 한 줄로 던지고 끝내지 말고 충분히 전개하라.
+  비유가 전개될수록 사연자의 모순이 더 선명해지는 방향으로.
+  비유의 형태는 이전 EP와 달라야 한다.
+
+  돌려까기: 직접 "잘못됐다"고 말하지 않는다.
+  아래 중 하나를 골라 3~4문장으로 전개하라. 한 줄 삽입 금지.
+  어떤 방식인지는 사연 맥락에서 스스로 판단하라.
+    · ワシ자기비하로 포장해서 간접적으로 상대를 부각
+    · 전혀 다른 이야기로 시작해서 사연자에게 착지
+    · 관찰자처럼 중계하다가 그 관찰 자체가 비판이 되게
+    · 위 세 가지 외에 이 사연에 더 잘 맞는 방식을 스스로 고안
+
+  마무리: 자기비하 키워드 포함, 2~3문장.
+  직접 위로 금지. 욕인지 위로인지 헷갈리는 상태로 끝낼 것.
+
+출력 스키마 (JSON only):
+{
+  "id": ${ctx.id},
+  "dj_reaction": "...",
+  "dj_transition": ${isLastEp ? 'null' : '"..."'}
+}
+
+분량 기준: dj_reaction 500~700字${isLastEp ? '' : ', dj_transition 80~130字'}`;
+
+  let retryFeedback = '';
+  let bestAttempt   = null;
+
+  return withRetry(async () => {
+    const prefix = retryFeedback
       ? `🚨 이전 생성에서 아래 문제가 발견됐습니다. 반드시 수정하여 재생성하세요:\n${retryFeedback}\n\n`
       : '';
 
     const result = await ai.models.generateContent({
       model: 'gemini-2.5-pro',
-      systemInstruction: SYSTEM_INSTRUCTION,
-      contents: [{ role: 'user', parts: [{ text: retryPrefix + userMessage }] }],
-      config: {
-        temperature:   1.0,
-        maxOutputTokens: 16384,
-        thinkingConfig: { thinkingBudget: 10000 },
-      },
+      systemInstruction: SYSTEM,
+      contents: [{ role: 'user', parts: [{ text: prefix + USER }] }],
+      config: GEMINI_CONFIG,
     });
 
-    const text = result.text ?? '';
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    const jsonMatch = (result.text ?? '').match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('JSON 파싱 실패');
     const parsed = JSON.parse(jsonMatch[0]);
 
-    const { lengthViolations, ruleViolations } = validateDjMents(parsed);
+    const { lengthViolations, ruleViolations } = validateEpReaction(parsed, ctx);
 
-    // 규칙 위반 없는 시도를 best로 기록 (분량 편차는 있어도 됨)
     if (ruleViolations.length === 0) {
       const score = lengthViolations.reduce((acc, v) => {
         const len = parseInt(v.match(/(\d+)字/)?.[1] ?? '0');
-        return acc + Math.abs(len - 300); // 편차 합산
+        return acc + Math.abs(len - 600);
       }, 0);
-      if (!bestAttempt || score < bestAttempt.score) {
-        bestAttempt = { parsed, ruleViolations, lengthViolations, score };
-      }
+      if (!bestAttempt || score < bestAttempt.score) bestAttempt = { parsed, score };
     }
 
     if (ruleViolations.length > 0 || lengthViolations.length > 0) {
-      // 규칙 위반과 분량 실패를 분리하여 구체적 피드백 생성
-      const rulePart   = ruleViolations.map((v, i) => `${i+1}. [규칙 위반] ${v}`).join('\n');
-      const lengthPart = buildLengthFeedback(lengthViolations, epContexts);
-      retryFeedback = [rulePart, lengthPart].filter(Boolean).join('\n');
+      const parts = [
+        ...ruleViolations.map((v, i) => `${i + 1}. [규칙 위반] ${v}`),
+        ...lengthViolations.map(v => `[분량] ${v}`),
+      ];
+      retryFeedback = parts.join('\n');
       throw new Error(`위반 ${ruleViolations.length}건 + 분량 오류 ${lengthViolations.length}건`);
     }
 
-    djMents = parsed;
-    if (retryCount > 0) console.log(`   ✅ ${retryCount}회 재시도 후 통과`);
-    break;
-  } catch (err) {
-    retryCount++;
-    console.warn(`⚠️  재시도 ${retryCount}/3: ${err.message?.slice(0, 120)}`);
-    if (retryCount >= 3) {
-      // 규칙 위반 없는 bestAttempt가 있으면 분량 편차를 감수하고 진행
-      if (bestAttempt) {
-        console.warn(`⚠️  재시도 소진 — 규칙 위반 없음, 분량 편차 ${bestAttempt.lengthViolations.length}건으로 진행`);
-        bestAttempt.lengthViolations.forEach(v => console.warn(`   📏 ${v}`));
-        djMents = bestAttempt.parsed;
-        break;
-      }
-      console.error('❌ 최대 재시도 초과 — 규칙 위반 미해결');
-      process.exit(1);
+    return parsed;
+  }, `EP${ctx.id} dj_reaction`).catch(err => {
+    if (bestAttempt) {
+      console.warn(`⚠️  EP${ctx.id} 재시도 소진 — 규칙 위반 없음, 분량 편차로 진행`);
+      return bestAttempt.parsed;
     }
-    await new Promise(r => setTimeout(r, 4000 * retryCount));
-  }
+    throw err;
+  });
 }
 
+// ── 호출 4: show_opening + show_closing 생성 ─────────────────────────────────
+async function generateOpeningClosing(epReactions) {
+  const SYSTEM = `${personaRules}
+
+---
+あなたはテンキ爺だ。今夜の放送全体を踏まえてオープニングとクロージングを書け。
+---`;
+
+  const reactionsContext = epReactions
+    .map(r => `EP${r.id} dj_reaction: ${r.dj_reaction}`)
+    .join('\n\n');
+
+  const USER = `【오늘 도쿄 날씨】${realTimeWeather}
+${forbiddenBlock}
+오늘 방송에서 이미 생성된 리액션:
+${reactionsContext}
+
+위 3개의 리액션 흐름을 파악하고 show_opening과 show_closing을 써라.
+
+show_closing은 3편을 나열하거나 요약하지 않는다.
+오늘 3편을 꿰뚫는 인간 관찰 하나를 テンキ爺의 언어로 정의하고,
+구독 요청은 이전 회차와 다른 방식으로 변주하라.
+
+출력 스키마 (JSON only):
+{
+  "show_opening": "...",
+  "show_closing": "...",
+  "tokyo_weather": "${realTimeWeather}",
+  "used_expressions": ["어휘 로그용 5~10개"]
+}
+
+분량 기준: show_opening 150~200字, show_closing 400~550字`;
+
+  let retryFeedback = '';
+  let bestAttempt   = null;
+
+  return withRetry(async () => {
+    const prefix = retryFeedback
+      ? `🚨 이전 생성에서 아래 문제가 발견됐습니다. 반드시 수정하여 재생성하세요:\n${retryFeedback}\n\n`
+      : '';
+
+    const result = await ai.models.generateContent({
+      model: 'gemini-2.5-pro',
+      systemInstruction: SYSTEM,
+      contents: [{ role: 'user', parts: [{ text: prefix + USER }] }],
+      config: GEMINI_CONFIG,
+    });
+
+    const jsonMatch = (result.text ?? '').match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('JSON 파싱 실패');
+    const parsed = JSON.parse(jsonMatch[0]);
+
+    const { lengthViolations, ruleViolations } = validateOpeningClosing(parsed);
+
+    if (ruleViolations.length === 0) {
+      const score = lengthViolations.reduce((acc, v) => {
+        const len = parseInt(v.match(/(\d+)字/)?.[1] ?? '0');
+        return acc + Math.abs(len - 375);
+      }, 0);
+      if (!bestAttempt || score < bestAttempt.score) bestAttempt = { parsed, score };
+    }
+
+    if (ruleViolations.length > 0 || lengthViolations.length > 0) {
+      const parts = [
+        ...ruleViolations.map((v, i) => `${i + 1}. [규칙 위반] ${v}`),
+        ...lengthViolations.map(v => `[분량] ${v}`),
+      ];
+      retryFeedback = parts.join('\n');
+      throw new Error(`위반 ${ruleViolations.length}건 + 분량 오류 ${lengthViolations.length}건`);
+    }
+
+    return parsed;
+  }, 'opening/closing').catch(err => {
+    if (bestAttempt) {
+      console.warn('⚠️  opening/closing 재시도 소진 — 규칙 위반 없음, 분량 편차로 진행');
+      return bestAttempt.parsed;
+    }
+    throw err;
+  });
+}
+
+// ── 메인 실행 ─────────────────────────────────────────────────────────────────
+console.log('🎙️  テンキ爺 DJ 멘트 생성 중 (Gemini 2.5 Pro + thinking)...');
+
+// 호출 1~3: EP별 개별 생성 (순차)
+const epReactions = [];
+for (const ctx of epContexts) {
+  console.log(`\n📻 EP${ctx.id} dj_reaction 생성 중...`);
+  const reaction = await generateEpReaction(ctx);
+  epReactions.push(reaction);
+  console.log(`   ✅ EP${ctx.id} 완료 (reaction: ${reaction.dj_reaction.length}字)`);
+}
+
+// 호출 4: opening + closing (3개 reaction을 컨텍스트로 전달)
+console.log('\n📻 show_opening + show_closing 생성 중...');
+const openingClosing = await generateOpeningClosing(epReactions);
+console.log(`   ✅ opening(${openingClosing.show_opening.length}字) + closing(${openingClosing.show_closing.length}字) 완료`);
+
 // ── 어휘 로그 업데이트 ────────────────────────────────────────────────────────
-const usedExpressions = djMents.used_expressions ?? [];
+const usedExpressions = openingClosing.used_expressions ?? [];
 if (usedExpressions.length > 0) {
   vocabLog.recent_eps.push({ ep_id: epId, generated_at: new Date().toISOString(), expressions: usedExpressions });
-  if (vocabLog.recent_eps.length > 3) vocabLog.recent_eps.shift(); // 최근 3EP만 유지
+  if (vocabLog.recent_eps.length > 3) vocabLog.recent_eps.shift();
   fs.writeFileSync(VOCAB_LOG_PATH, JSON.stringify(vocabLog, null, 2), 'utf-8');
   console.log(`📝 어휘 로그 업데이트 (${usedExpressions.length}개 표현 기록)`);
 }
 
-// ── 결과 조립 ────────────────────────────────────────────────────────────────
-djMents.show_opening  = djMents.show_opening  || 'おう、電波泥棒ども！今夜もワシのポンコツ電波を盗みに来やがったか。';
-djMents.show_closing  = djMents.show_closing  || 'ふん、今夜はここまでだ。また次回な、コノヤロー！';
-(djMents.episodes ?? []).forEach(ep => {
-  ep.dj_reaction = ep.dj_reaction || `EP${ep.id}か... まあ、それなりに生きてるじゃないか。`;
-});
-
+// ── 결과 병합 → 02_dj_script.json ────────────────────────────────────────────
 const merged = {
-  show_opening:   djMents.show_opening,
-  show_closing:   djMents.show_closing,
-  tokyo_weather:  realTimeWeather,
+  show_opening:  openingClosing.show_opening  || 'おう、電波泥棒ども！今夜もワシのポンコツ電波を盗みに来やがったか。',
+  show_closing:  openingClosing.show_closing  || 'ふん、今夜はここまでだ。また次回な、コノヤロー！',
+  tokyo_weather: realTimeWeather,
   episodes: episodes.map(ep => {
-    const djEp = (djMents.episodes ?? []).find(d => d.id === ep.id);
-    return { ...ep, dj_reaction: djEp?.dj_reaction || '', dj_transition: djEp?.dj_transition || null };
+    const djEp = epReactions.find(r => r.id === ep.id);
+    return {
+      ...ep,
+      dj_reaction:   djEp?.dj_reaction   || `EP${ep.id}か... まあ、それなりに生きてるじゃないか。`,
+      dj_transition: djEp?.dj_transition ?? null,
+    };
   }),
 };
 
-// QA 저장
-if (includeQna && djMents.qa_segment) {
-  const qaOut = {
-    intro:    djMents.qa_segment.intro || '',
-    qa_pairs: (djMents.qa_segment.pairs || []).map(p => ({ question: p.q, answer: p.a })),
-    outro:    merged.show_closing,
-  };
-  fs.writeFileSync(P.qaScript, JSON.stringify(qaOut, null, 2), 'utf-8');
-  console.log('✅ 08_qa_script.json 저장 완료');
-}
-
 fs.writeFileSync(P.djScript, JSON.stringify(merged, null, 2), 'utf-8');
 validateDjScript(merged);
-updateStage(epId, 'dj_script');
+updateStage(P, 'dj_script');
 
-console.log('✅ 02_dj_script.json 저장 완료');
+console.log('\n✅ 02_dj_script.json 저장 완료');
 console.log(`   🌤  날씨: ${realTimeWeather}`);
-console.log(`   오프닝: ${merged.show_opening.slice(0, 60)}...`);
+console.log(`   오프닝(${merged.show_opening.length}字): ${merged.show_opening.slice(0, 60)}...`);
 merged.episodes.forEach(ep => {
-  const ctx = epContexts.find(c => c.id === ep.id);
+  const ctx  = epContexts.find(c => c.id === ep.id);
   const tags = [ctx?.isMZ ? '[MZ]' : '', ctx?.isVillain ? '[빌런]' : ''].filter(Boolean).join(' ');
   console.log(`   EP${ep.id}${tags ? ' ' + tags : ''} 리액션(${ep.dj_reaction.length}字): ${ep.dj_reaction.slice(0, 60)}...`);
 });

@@ -1124,8 +1124,9 @@ fs.writeFileSync(OUTPUT_PATH, JSON.stringify(newDraft, null, 2), 'utf-8');
   }
 
   // 1. 타겟 폴더명 생성 — 정식(EP_N_youtube)이면 epId 그대로, 테스트면 타임스탬프
-  const isYoutubeEp = /_youtube$/.test(epId);
-  const folderName = isYoutubeEp ? epId : (() => {
+  const isYoutubeEp = /_youtube$/i.test(epId);
+  // youtube 에피소드는 EP_ 접두사를 대문자로 정규화, _youtube 접미사는 소문자 고정
+  const folderName = isYoutubeEp ? epId.replace(/^ep_/i, 'EP_').replace(/_youtube$/i, '_youtube') : (() => {
     const now = new Date();
     const pad = (n) => String(n).padStart(2, '0');
     const stamp = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
@@ -1134,20 +1135,27 @@ fs.writeFileSync(OUTPUT_PATH, JSON.stringify(newDraft, null, 2), 'utf-8');
   const targetDir  = path.join(DRAFTS_DIR, folderName);
   fs.mkdirSync(targetDir, { recursive: true });
 
-  // 2. 껍데기(meta_info) 로드
+  // 2. 껍데기(meta_info) 로드 + 소재 경로 갱신
   const metaTemplatePath = path.join(P.masterTemplate, 'draft_meta_info.json');
   if (!fs.existsSync(metaTemplatePath)) {
     console.error('❌ master_template/draft_meta_info.json 없음');
     console.error('   먼저 실행: node .radio_output/run_00_extract_meta.mjs');
     process.exit(1);
   }
-  const metaInfo = JSON.parse(fs.readFileSync(metaTemplatePath, 'utf-8'));
+  // 템플릿의 .radio_output 경로를 현재 에피소드 경로로 교체 (raw string replace)
+  const epImagesUrl = normPath(P.images);  // C:/radio-dj-studio/.output/{epId}/images
+  const epAudioUrl  = normPath(P.audio);   // C:/radio-dj-studio/.output/{epId}/audio
+  const metaRaw = fs.readFileSync(metaTemplatePath, 'utf-8')
+    .replace(/C:\/radio-dj-studio\/\.radio_output\/images\//g, `${epImagesUrl}/`)
+    .replace(/C:\/radio-dj-studio\/\.radio_output\/audio\//g,  `${epAudioUrl}/`);
+  const metaInfo = JSON.parse(metaRaw);
 
   // 3. Root UUID 발급
   const rootUUID = newUUID();
 
-  // 4. 껍데기 갱신
+  // 4. 껍데기 갱신 (id + draft_id 동시 갱신 → root_meta_info.json과 일치)
   metaInfo.id             = rootUUID;
+  metaInfo.draft_id       = rootUUID;
   metaInfo.draft_name     = folderName;
   metaInfo.draft_fold_path = normPath(targetDir);
 

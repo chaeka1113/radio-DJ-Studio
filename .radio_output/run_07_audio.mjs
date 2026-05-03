@@ -70,11 +70,11 @@ function getCallerVoiceId(ageStr, genderStr) {
   const age = parseInt(ageStr) || 60;
   const isFemale = genderStr?.includes('女');
   if (isFemale) {
-    if (age >= 60) return pickRandom(CALLER_VOICE_POOLS.elderly_female);
+    if (age >= 55) return pickRandom(CALLER_VOICE_POOLS.elderly_female);
     if (age >= 40) return pickRandom(CALLER_VOICE_POOLS.middle_female);
     return pickRandom(CALLER_VOICE_POOLS.young_female);
   } else {
-    if (age >= 60) return pickRandom(CALLER_VOICE_POOLS.elderly_male);
+    if (age >= 55) return pickRandom(CALLER_VOICE_POOLS.elderly_male);
     if (age >= 40) return pickRandom(CALLER_VOICE_POOLS.middle_male);
     return pickRandom(CALLER_VOICE_POOLS.young_male);
   }
