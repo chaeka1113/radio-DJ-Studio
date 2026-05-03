@@ -126,7 +126,12 @@ async function withRetry(fn, label, maxRetry = 3) {
     } catch (err) {
       lastErr = err;
       console.warn(`⚠️  ${label} 재시도 ${attempt + 1}/${maxRetry}: ${err.message?.slice(0, 120)}`);
-      if (attempt < maxRetry - 1) await new Promise(r => setTimeout(r, 4000 * (attempt + 1)));
+      if (attempt < maxRetry - 1) {
+        const is503 = err.status === 503 || err.message?.includes('503') || err.message?.includes('UNAVAILABLE');
+        const delay = is503 ? [30000, 60000, 120000][attempt] ?? 120000 : 4000 * (attempt + 1);
+        console.log(`⏳ ${Math.round(delay / 1000)}초 후 재시도...`);
+        await new Promise(r => setTimeout(r, delay));
+      }
     }
   }
   throw lastErr;
@@ -381,12 +386,29 @@ show_closing은 3편을 나열하거나 요약하지 않는다.
 // ── 메인 실행 ─────────────────────────────────────────────────────────────────
 console.log('🎙️  テンキ爺 DJ 멘트 생성 중 (Gemini 2.5 Pro + thinking)...');
 
-// 호출 1~3: EP별 개별 생성 (순차)
-const epReactions = [];
+const CHECKPOINT_PATH = path.join(path.dirname(P.djScript), '02_ep_reactions_checkpoint.json');
+
+// 체크포인트 복원
+let checkpointReactions = [];
+if (fs.existsSync(CHECKPOINT_PATH)) {
+  try {
+    checkpointReactions = JSON.parse(fs.readFileSync(CHECKPOINT_PATH, 'utf-8'));
+    console.log(`♻️  체크포인트 복원: EP${checkpointReactions.map(r => r.id).join(', EP')} 건너뜀`);
+  } catch (_) { checkpointReactions = []; }
+}
+
+// 호출 1~3: EP별 개별 생성 (순차, 체크포인트 있으면 건너뜀)
+const epReactions = [...checkpointReactions];
 for (const ctx of epContexts) {
+  if (epReactions.find(r => r.id === ctx.id)) {
+    console.log(`\n⏭️  EP${ctx.id} 체크포인트 있음 — 건너뜀`);
+    continue;
+  }
   console.log(`\n📻 EP${ctx.id} dj_reaction 생성 중...`);
   const reaction = await generateEpReaction(ctx);
   epReactions.push(reaction);
+  // 즉시 체크포인트 저장
+  fs.writeFileSync(CHECKPOINT_PATH, JSON.stringify(epReactions, null, 2), 'utf-8');
   console.log(`   ✅ EP${ctx.id} 완료 (reaction: ${reaction.dj_reaction.length}字)`);
 }
 
@@ -420,6 +442,7 @@ const merged = {
 };
 
 fs.writeFileSync(P.djScript, JSON.stringify(merged, null, 2), 'utf-8');
+if (fs.existsSync(CHECKPOINT_PATH)) fs.unlinkSync(CHECKPOINT_PATH);
 validateDjScript(merged);
 updateStage(P, 'dj_script');
 
