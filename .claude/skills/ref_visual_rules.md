@@ -69,10 +69,12 @@ type: reference
 ---
 
 ### Case A — 캐릭터가 화면을 보는 씬 (카메라에 뒷면이 찍힘)
-캐릭터가 기기를 들고 화면을 보고 있는 경우. 뒷면이 자연스럽게 카메라 방향이 됨.
+캐릭터가 기기를 보고 있는 경우. **구도: 캐릭터 → 기기 → 카메라**.
+기기 화면은 캐릭터를 향하고, 카메라는 기기 **뒷면**을 봄.
 
-- 프롬프트: `character looking at the [device] screen (screen facing character), plain matte back panel with only small circular camera lenses visible to camera — absolutely NO screen or display on the back panel`
-- 네거티브: `screen on back panel, display on back cover, rear screen, glowing back of device`
+- 스마트폰/태블릿: `character looking at the [device] screen (screen facing character, away from camera), plain matte back panel with only small circular camera lenses visible to camera — absolutely NO screen or display on the back panel. Screen glow illuminates character's face from the front.`
+- TV: `camera positioned BEHIND the TV — sees only the plain matte back panel (ventilation slots, cable ports). Character in background with face front-lit by the TV screen's glow (screen faces character, away from camera).`
+- 네거티브: `screen on back panel, display on back cover, rear screen, glowing back of device, TV screen facing camera, screen visible to camera`
 
 ### Case B — 캐릭터에게 화면을 보여주는 씬 (카메라에 앞면이 찍힘)
 다른 사람 또는 캐릭터 스스로 화면을 카메라/상대방 쪽으로 향하는 경우. 전면 화면이 카메라에 보이는 것은 정상.

@@ -88,7 +88,9 @@ const GLOBAL_NEGATIVE = [
   'glasses, spectacles, nsfw, blurry background on main subject, watermark,',
   'western facial features, text, letters, words, subtitles, captions,',
   'japanese text, chinese text, korean text, typography, font, writing,',
-  'dialogue box, speech bubble, signs with text.',
+  'dialogue box, speech bubble, signs with text,',
+  'screen on back of device, display on back panel, rear screen, glowing back panel,',
+  'back panel with display, TV screen facing camera, phone screen facing camera.',
 ].join(' ');
 
 // ── 씬 타입별 촬영 스타일 ─────────────────────────────────────────────────────
@@ -156,8 +158,33 @@ function detectSecondaryChars(scene, epId) {
   );
 }
 
+// ── 기기 뒷면 규칙 자동 감지 (Case A: 캐릭터가 기기를 보는 구도) ──────────────
+// 캐릭터→기기→카메라 순서일 때 카메라는 기기 뒷면만 봐야 함.
+// 뒷면에 화면·글씨·발광이 절대 그려지지 않도록 강제 블록 주입.
+const DEVICE_RE   = /\b(smartphone|phone|tv|television|tablet|monitor|computer screen)\b/i;
+const WATCHING_RE = /\b(looking at|staring at|watching|checking|reading|behind the|away from camera|screen facing (character|him|her|them|away))\b/i;
+const SHOWING_RE  = /\b(showing|holding up|screen facing (camera|viewer|audience)|facing (camera|viewer))\b/i;
+
+function buildDeviceBackRule(scene) {
+  const text = ((scene.visual_prompt_en ?? '') + ' ' + (scene.camera_direction ?? '')).toLowerCase();
+  if (!DEVICE_RE.test(text))   return null;  // 기기 없음
+  if (SHOWING_RE.test(text))   return null;  // Case B (기기를 카메라 쪽으로 보여주는 씬)
+  if (!WATCHING_RE.test(text)) return null;  // 보는 관계 없음
+  return [
+    '=== PHYSICAL DEVICE ORIENTATION RULE (MANDATORY) ===',
+    'A character in this scene is WATCHING a device (phone, TV, tablet, or similar).',
+    'CRITICAL PHYSICAL LAW: The screen faces the CHARACTER — it is turned AWAY from the camera.',
+    'WHAT THE CAMERA SEES: ONLY the BACK PANEL of the device.',
+    '  • Smartphone / tablet back: plain matte surface with 1-2 small circular camera lenses. NO screen, NO glow, NO display.',
+    '  • TV back: plain dull panel with ventilation slots and cable ports only. NO screen, NO display, NO light from back.',
+    'The screen light ONLY illuminates the character\'s face from the front.',
+    'VIOLATION CHECK: If any screen or display is visible on the side facing the camera → REJECT and regenerate.',
+    '=== END DEVICE ORIENTATION RULE ===',
+  ].join('\n');
+}
+
 // ── プロンプト構築 ─────────────────────────────────────────────────────────────
-// 構造: [主人公LOCK] [보조캐릭터LOCK...] [SCENE] [STYLE] [FORBIDDEN]
+// 構造: [主人公LOCK] [보조캐릭터LOCK...] [SCENE] [DEVICE RULE?] [STYLE] [FORBIDDEN]
 function buildPrompt(scene, dna, epId) {
   const isFlashback = scene.type === 'FLASHBACK';
 
@@ -201,6 +228,12 @@ function buildPrompt(scene, dna, epId) {
   if (dialogueCtx) parts.push(dialogueCtx);
   parts.push(sceneDesc);
   parts.push('=== END SCENE ===', '');
+
+  // 기기 뒷면 규칙 자동 주입 (Case A 감지 시)
+  const deviceBackRule = buildDeviceBackRule(scene);
+  if (deviceBackRule) {
+    parts.push(deviceBackRule, '');
+  }
 
   parts.push('=== STYLE ===');
   parts.push(STYLE_BASE);
