@@ -103,7 +103,7 @@ const TRANS_DURATION   = 1_000_000;               // B 페이드 1.0s
 const NOISE_OUT_DUR    = 2_000_000;               // 노이즈 아웃 2.0s
 const WHITE_IN_DUR     = 2_300_000;               // 화이트 인 2.3s
 const TAPE_DUR         = toUs(1.93);              // 80년대 테이프 1.93s
-const BGM_VOL          = 0.05011872947216034;
+const BGM_VOL          = 0.17782793939113617;
 const TTS_VOL          = 0.5011872053146362;
 const SENTENCE_END     = new Set(['。', '！', '？', '!', '?', '…']);
 
