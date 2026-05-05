@@ -322,72 +322,96 @@ ${chapterText}
 fs.writeFileSync(path.join(YOUTUBE_DIR, 'pinned_comment.txt'), pinnedTxt, 'utf-8');
 console.log('✅ pinned_comment.txt 저장 완료');
 
-// ─── 썸네일 생성 ─────────────────────────────────────────────────────────────
-const W = 1280, H = 720;
-const SAFE_BOT = H - 40;   // 하단 40px 안전구역 (ID 바 없음)
-const TEXT_X   = W * 0.44; // 텍스트 시작 X
-const TEXT_MAX_W = W * 0.53;
+// ─── 썸네일 렌더링 Configuration ──────────────────────────────────────────────
+const THUMB_CONFIG = {
+  W: 1280,
+  H: 720,
+  // 텍스트 열 위치
+  TEXT_START_X_RATIO: 0.44,   // 텍스트 시작 X (전체 너비 대비)
+  TEXT_AREA_W_RATIO:  0.53,   // 텍스트 최대 너비 (전체 너비 대비)
+  // 폰트 크기
+  MAIN_FONT_MAX:  310,        // 최대 폰트 (단어 수 적을수록 이 값에 근접)
+  MAIN_FONT_MIN:  72,         // 최소 폰트 (텍스트가 매우 길 때 하한)
+  MAIN_FONT_STEP: 4,          // 축소 단위
+  SUB_FONT_RATIO: 0.40,       // sub 크기 = main 크기 × 이 값
+  // 레이아웃
+  SUB_GAP:      16,           // main 하단 ~ sub 상단 간격(px) — 이 간격의 중간점이 이미지 Y 정중앙
+  // 3단 레이어 렌더링 파라미터
+  STROKE_RATIO: 0.15,         // stroke lineWidth = fontSize × 이 값
+  STROKE_MIN:   15,           // stroke 최소값(px) — 작은 폰트에서도 굵게
+  SHADOW_BLUR:  22,
+  SHADOW_X:     6,
+  SHADOW_Y:     6,
+  // 감정별 색상 팔레트 (A/B 테스트 시 여기만 수정)
+  EMOTION_PALETTE: {
+    angry:    { main: '#FFD700', sub: '#FF8C00', grad: [0.35, 'rgba(60,0,0,0.85)',  'rgba(20,0,0,0.95)']  },
+    calm:     { main: '#A8D8FF', sub: '#D0ECFF', grad: [0.35, 'rgba(0,20,60,0.85)', 'rgba(0,10,40,0.95)'] },
+    surprise: { main: '#ADFFA8', sub: '#FFFFA0', grad: [0.35, 'rgba(0,40,20,0.85)', 'rgba(0,20,10,0.95)'] },
+  },
+};
 
-// 폰트 크기 자동 축소: maxWidth 초과 시 줄여서 1줄에 맞춤
-function fitFontSize(ctx, text, maxWidth, startSize, minSize = 60) {
-  let size = startSize;
-  while (size >= minSize) {
+const { W, H, EMOTION_PALETTE } = THUMB_CONFIG;
+const TEXT_X     = W * THUMB_CONFIG.TEXT_START_X_RATIO;
+const TEXT_MAX_W = W * THUMB_CONFIG.TEXT_AREA_W_RATIO;
+
+// Bounding Box 기반 Auto-Scaling: MAIN_FONT_MAX 에서 시작해 박스에 맞을 때까지 축소
+function fitFontSize(ctx, text, maxWidth) {
+  const { MAIN_FONT_MAX, MAIN_FONT_MIN, MAIN_FONT_STEP } = THUMB_CONFIG;
+  let size = MAIN_FONT_MAX;
+  while (size > MAIN_FONT_MIN) {
     ctx.font = `bold ${size}px NotoSansJP`;
     if (ctx.measureText(text).width <= maxWidth) break;
-    size -= 6;
+    size -= MAIN_FONT_STEP;
   }
-  return size;
+  return Math.max(size, MAIN_FONT_MIN);
 }
 
-// 텍스트 + 두꺼운 스트로크 + 드롭섀도우
+// 3단 레이어 렌더링: ① Drop Shadow → ② 두꺼운 검은 Stroke → ③ 색상 Fill
 function drawHeroText(ctx, text, x, y, fontSize, fillColor) {
+  const { STROKE_RATIO, STROKE_MIN, SHADOW_BLUR, SHADOW_X, SHADOW_Y } = THUMB_CONFIG;
+  const strokeW = Math.max(STROKE_MIN, Math.round(fontSize * STROKE_RATIO));
+
   ctx.font         = `bold ${fontSize}px NotoSansJP`;
   ctx.textBaseline = 'top';
   ctx.lineJoin     = 'round';
 
-  // 드롭 섀도우 (스트로크 뒤에 그림자 레이어)
-  ctx.shadowColor   = 'rgba(0,0,0,0.9)';
-  ctx.shadowBlur    = 12;
-  ctx.shadowOffsetX = 4;
-  ctx.shadowOffsetY = 4;
-
-  // 검은 테두리 (두껍게)
-  ctx.strokeStyle = '#000000';
-  ctx.lineWidth   = fontSize * 0.14;
+  // Layer 1: Drop Shadow 부착 상태로 Stroke
+  ctx.shadowColor   = 'rgba(0,0,0,0.95)';
+  ctx.shadowBlur    = SHADOW_BLUR;
+  ctx.shadowOffsetX = SHADOW_X;
+  ctx.shadowOffsetY = SHADOW_Y;
+  ctx.strokeStyle   = '#000000';
+  ctx.lineWidth     = strokeW;
   ctx.strokeText(text, x, y);
 
-  // 섀도우 리셋 후 채우기
+  // Layer 2: Shadow 제거 후 Stroke 재도포 (테두리 선명도 강화)
   ctx.shadowColor = 'transparent';
-  ctx.fillStyle   = fillColor;
+  ctx.strokeText(text, x, y);
+
+  // Layer 3: Fill
+  ctx.fillStyle = fillColor;
   ctx.fillText(text, x, y);
 }
 
-function drawSubText(ctx, text, x, y, subColor) {
-  const subSize = 42;
+function drawSubText(ctx, text, x, y, subSize, subColor) {
+  const strokeW = Math.max(8, Math.round(subSize * THUMB_CONFIG.STROKE_RATIO));
+
   ctx.font         = `bold ${subSize}px NotoSansJP`;
   ctx.textBaseline = 'top';
   ctx.lineJoin     = 'round';
 
-  ctx.shadowColor   = 'rgba(0,0,0,0.8)';
-  ctx.shadowBlur    = 6;
-  ctx.shadowOffsetX = 2;
-  ctx.shadowOffsetY = 2;
-
-  ctx.strokeStyle = '#000000';
-  ctx.lineWidth   = 8;
+  ctx.shadowColor   = 'rgba(0,0,0,0.85)';
+  ctx.shadowBlur    = 10;
+  ctx.shadowOffsetX = 3;
+  ctx.shadowOffsetY = 3;
+  ctx.strokeStyle   = '#000000';
+  ctx.lineWidth     = strokeW;
   ctx.strokeText(text, x, y);
 
   ctx.shadowColor = 'transparent';
   ctx.fillStyle   = subColor;
   ctx.fillText(text, x, y);
 }
-
-// 감정별 색상 팔레트
-const EMOTION_PALETTE = {
-  angry:    { main: '#FFD700', sub: '#FF8C00', grad: [0.35, 'rgba(60,0,0,0.85)',    'rgba(20,0,0,0.95)'] },
-  calm:     { main: '#A8D8FF', sub: '#D0ECFF', grad: [0.35, 'rgba(0,20,60,0.85)',   'rgba(0,10,40,0.95)'] },
-  surprise: { main: '#ADFFA8', sub: '#FFFFA0', grad: [0.35, 'rgba(0,40,20,0.85)',   'rgba(0,20,10,0.95)'] },
-};
 
 async function buildThumbnail({ emotion, mainText, subText, outPath, label }) {
   process.stdout.write(`🖼  ${label} 생성 중... `);
@@ -414,18 +438,17 @@ async function buildThumbnail({ emotion, mainText, subText, outPath, label }) {
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
 
-  // ── 3. sub 텍스트 (상단 위치, 중간 크기) ─────────────────────────────────
-  const SUB_Y    = H * 0.28;
-  const MAIN_Y   = SUB_Y + 58; // sub 아래 바로 main
-  drawSubText(ctx, subText, TEXT_X, SUB_Y, pal.sub);
-
-  // ── 4. main 텍스트 (폰트 자동 축소, 초대형) ──────────────────────────────
-  const mainSize = fitFontSize(ctx, mainText, TEXT_MAX_W, 170, 80);
+  // ── 3. main + sub 텍스트 — 두 텍스트 간격의 중간점이 이미지 Y축 정중앙
+  const mainSize = fitFontSize(ctx, mainText, TEXT_MAX_W);
+  const subSize  = Math.round(mainSize * THUMB_CONFIG.SUB_FONT_RATIO);
+  const MAIN_Y   = H / 2 - THUMB_CONFIG.SUB_GAP / 2 - mainSize;
+  const SUB_Y    = H / 2 + THUMB_CONFIG.SUB_GAP / 2;
   drawHeroText(ctx, mainText, TEXT_X, MAIN_Y, mainSize, pal.main);
+  drawSubText(ctx, subText, TEXT_X, SUB_Y, subSize, pal.sub);
 
   const buf = canvas.toBuffer('image/png');
   fs.writeFileSync(outPath, buf);
-  console.log(`✅ (${emotion} / main:${mainSize}px / ${(buf.length/1024).toFixed(0)} KB)`);
+  console.log(`✅ (${emotion} / main:${mainSize}px sub:${subSize}px / ${(buf.length/1024).toFixed(0)} KB)`);
 }
 
 // 3종 썸네일 생성
