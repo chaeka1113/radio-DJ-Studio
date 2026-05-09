@@ -34,7 +34,7 @@ if (!fs.existsSync(P.capcutMaterials)) {
   console.error('   먼저 실행: node .radio_output/run_00_extract_materials.mjs');
   process.exit(1);
 }
-const REF = JSON.parse(fs.readFileSync(P.capcutMaterials, 'utf-8'));
+const REF = JSON.parse(fs.readFileSync(P.capcutMaterials, 'utf-8').replace(/^﻿/, ''));
 
 const audioDir = P.audio;
 const tsFiles  = fs.readdirSync(audioDir).filter(f => f.endsWith('_timestamps.json')).sort();

@@ -293,7 +293,7 @@ app.post('/api/generate-scripts', async (req, res) => {
   sse.done(0);
 });
 
-// 02 DJ 멘트 생성
+// 02 DJ 멘트 생성 (+ --qna 시 08_qa_script.json 포함)
 app.post('/api/generate-dj', (req, res) => {
   const { includeQna } = req.body || {};
   const sse  = sseStream(res);

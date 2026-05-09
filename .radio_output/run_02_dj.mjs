@@ -17,6 +17,8 @@ const epId = process.env.EP_ID ?? generateEpId();
 const P    = makePaths(epId);
 ensureDirs(P);
 
+const includeQna = process.argv.includes('--qna');
+
 const GEMINI_KEY = requireEnv('GEMINI_API_KEY');
 const ai = new GoogleGenAI({ apiKey: GEMINI_KEY });
 
@@ -383,6 +385,88 @@ show_closing은 3편을 나열하거나 요약하지 않는다.
   });
 }
 
+// ── 호출 5 (--qna 시만): 즉문즉답 코너 생성 ─────────────────────────────────
+async function generateQaSegment() {
+  const SYSTEM = `${personaRules}
+
+---
+あなたはテンキ爺だ。今から「即問即答コーナー」を진행한다.
+질문 수: 정확히 5개. 각 답변 60字 이상. 자기비하 키워드 전체 3회 이상.
+---`;
+
+  const USER = `즉문즉답 코너 대본을 JSON으로 생성하라.
+
+규칙:
+- 질문 수: 정확히 5개
+- 5개 중 최소 1개: 관절염·돋보기안경·건강검진·손주 용돈·혈압약·불면증 등 시니어 일상 고민
+- 답변 구조: ① 어이없다는 반응 → ② 독설+자기비하 비유(ポンコツ/8ビット/256KB 중 하나)+잔소리 1문장 → ③ 투박한 위로 1문장
+- 5문답 전체에 자기비하 키워드(ポンコツ/ガラクタ/8ビット/256KB/廃品回収/錆/ネジが緩い/旧型) 최소 3회
+- 각 답변 최소 60文字
+- 허용 Audio Tag 적극 활용: [sighs][laughs][scoffs][chuckles][nervous][angry]
+
+출력 스키마 (JSON only):
+{
+  "intro": "コーナー진입 멘트 (50~80字)",
+  "pairs": [
+    {"q": "청취자 질문", "a": "テンキ爺 답변 (60字 이상)"},
+    {"q": "...", "a": "..."},
+    {"q": "...", "a": "..."},
+    {"q": "...", "a": "..."},
+    {"q": "...", "a": "..."}
+  ]
+}`;
+
+  let retryFeedback = '';
+  let bestAttempt   = null;
+
+  return withRetry(async () => {
+    const prefix = retryFeedback
+      ? `🚨 이전 생성에서 아래 문제가 발견됐습니다. 반드시 수정하여 재생성하세요:\n${retryFeedback}\n\n`
+      : '';
+
+    const result = await ai.models.generateContent({
+      model: 'gemini-2.5-pro',
+      systemInstruction: SYSTEM,
+      contents: [{ role: 'user', parts: [{ text: prefix + USER }] }],
+      config: GEMINI_CONFIG,
+    });
+
+    const jsonMatch = (result.text ?? '').match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('JSON 파싱 실패');
+    const parsed = JSON.parse(jsonMatch[0]);
+
+    const errors = [];
+    if (!parsed.intro?.trim()) errors.push('intro 없음');
+    if (!Array.isArray(parsed.pairs)) {
+      errors.push('pairs 배열 없음');
+    } else {
+      if (parsed.pairs.length !== 5) errors.push(`pairs ${parsed.pairs.length}개 — 정확히 5개 필요`);
+      parsed.pairs.forEach((p, i) => {
+        if (!p.q?.trim()) errors.push(`Q${i + 1} 질문 없음`);
+        if (!p.a?.trim()) errors.push(`Q${i + 1} 답변 없음`);
+        if ((p.a || '').length < 60) errors.push(`Q${i + 1} 답변 ${(p.a || '').length}字 — 60字 이상 필요`);
+      });
+      const selfDeprecCount = (JSON.stringify(parsed.pairs) || '').match(/ポンコツ|ガラクタ|8ビット|256KB|廃品回収|錆|ネジが緩い|旧型/g)?.length ?? 0;
+      if (selfDeprecCount < 3) errors.push(`자기비하 키워드 ${selfDeprecCount}회 — 3회 이상 필요`);
+    }
+
+    if (errors.length === 0 && !bestAttempt) bestAttempt = { parsed };
+
+    if (errors.length > 0) {
+      retryFeedback = errors.join('\n');
+      throw new Error(`검증 실패: ${errors.join(' / ')}`);
+    }
+
+    return parsed;
+  }, 'qa_segment').catch(err => {
+    if (bestAttempt) {
+      console.warn('⚠️  qa_segment 재시도 소진 — bestAttempt으로 진행');
+      return bestAttempt.parsed;
+    }
+    throw err;
+  });
+}
+
 // ── 메인 실행 ─────────────────────────────────────────────────────────────────
 console.log('🎙️  テンキ爺 DJ 멘트 생성 중 (Gemini 2.5 Pro + thinking)...');
 
@@ -445,6 +529,19 @@ fs.writeFileSync(P.djScript, JSON.stringify(merged, null, 2), 'utf-8');
 if (fs.existsSync(CHECKPOINT_PATH)) fs.unlinkSync(CHECKPOINT_PATH);
 validateDjScript(merged);
 updateStage(P, 'dj_script');
+
+// ── 호출 5: QA 코너 대본 생성 (--qna 시만) ───────────────────────────────────
+if (includeQna) {
+  console.log('\n🎙️  즉문즉답 코너 대본 생성 중...');
+  const qaSegment = await generateQaSegment();
+  const qaOut = {
+    intro:    qaSegment.intro || '',
+    qa_pairs: (qaSegment.pairs || []).map(p => ({ question: p.q, answer: p.a })),
+    outro:    merged.show_closing,
+  };
+  fs.writeFileSync(P.qaScript, JSON.stringify(qaOut, null, 2), 'utf-8');
+  console.log(`✅ 08_qa_script.json 저장 완료 (Q&A ${qaOut.qa_pairs.length}쌍)`);
+}
 
 console.log('\n✅ 02_dj_script.json 저장 완료');
 console.log(`   🌤  날씨: ${realTimeWeather}`);
