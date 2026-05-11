@@ -58,7 +58,7 @@ const CALLER_VOICE_POOLS = {
   middle_female:  ['GR4dBIFsYe57TxyrHKXz', 'q3eHxuMah31iifOfMrz0', 'mN6r4VCXacoTliYLh0A2', 'c2XJrw7TvNGtOc6r0ijG', 'T7yYq3WpB94yAuOXraRi'],
   young_female:   ['fUjY9K2nAIwlALOwSiwc', '3321Alera3fXjEWjjbAX', 'JTlYtJrcTzPC71hMLOxo', 'ugYcuAusTuWCSOpJD0Xd', 'dhGvgIx0X6G3xzSWqOye'],
   elderly_male:   ['QH5PYulAezU4H8VXwlJx', '8BU0fsFBiPt1cbGZ5lK9', '9NgkqGk9ImCns5ZyAIzN', 'l5KWIFmhhsVdaYchBLIn', '8FuuqoKHuM48hIEwni5e', 'C8e2F6Cm3l58PjXaVpUW'],
-  middle_male:    ['QVEG0HcMh8UIG8OE5Zrv', '2UGDsJpBJAiAlF0jQQ7x', 'ETXjMrhy5NZL6i4w0V3', 'qaCSabKToUUT4sTqBZtz', 'vzIXwvf41vKosKu00hYj'],
+  middle_male:    ['QVEG0HcMh8UIG8OE5Zrv', '2UGDsJpBJAiAlF0jQQ7x', 'qaCSabKToUUT4sTqBZtz', 'vzIXwvf41vKosKu00hYj'],
   young_male:     ['6XNSYkDqZ1blajSVtPok', 'nZyvxotzaGDEPIaigNEe', 'TzUI53GPXnGDRdeLAWZ4', 'XY4FsKJKqXdAJVWFqSit', 'aeFr7JZaVm2rwnkGfuP3'],
 };
 
