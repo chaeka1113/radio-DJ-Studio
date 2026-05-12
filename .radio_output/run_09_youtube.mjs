@@ -115,12 +115,8 @@ function buildChapters(audioDir, dj, hasQa) {
     chapters.push({ label: `📖 EP3「${eps[2].title || eps[2].theme}」`, time: t });
     t += d.ep3Story + SILENCE + d.ep3Dj + SILENCE;
   }
-  if (hasQa && d.qaClose > 0) {
-    chapters.push({ label: '❓ Q&Aコーナー', time: t });
-    // qa_and_closing 파일에서 약 75%가 QA, 25%가 엔딩으로 추정
-    t += d.qaClose * 0.75;
-  }
-  chapters.push({ label: '🎵 エンディング', time: t });
+  const finalLabel = hasQa ? '❓ Q&A＆エンディング' : '🎵 エンディング';
+  chapters.push({ label: finalLabel, time: t });
 
   return chapters.map(c => `${secToMmss(Math.round(c.time))} ${c.label}`).join('\n');
 }
