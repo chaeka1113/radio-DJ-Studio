@@ -38,9 +38,9 @@ const IMAGE_SHORTS_DIR  = path.join(P.base, 'images_shorts');
 const IMAGE_SEARCH_DIR  = SINGLE_QA !== null
   ? path.join(IMAGE_SHORTS_DIR, `QA${SINGLE_QA}`)
   : IMAGE_SHORTS_DIR;
-const CAPCUT_SHORTS_DIR = path.join(P.base, 'capcut_shorts');
+const CAPCUT_SHORTS_DIR = path.join(P.base, `${epId}_shorts`);
 const CAPCUT_QA_DIR     = SINGLE_QA !== null
-  ? path.join(CAPCUT_SHORTS_DIR, `QA${SINGLE_QA}`)
+  ? path.join(P.base, `${epId}_QA${SINGLE_QA}_shorts`)
   : CAPCUT_SHORTS_DIR;
 fs.mkdirSync(CAPCUT_QA_DIR, { recursive: true });
 const OUTPUT_PATH = path.join(CAPCUT_QA_DIR, 'draft_content.json');
