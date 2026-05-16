@@ -702,6 +702,7 @@ body {
         <div style="font-family:'JetBrains Mono',monospace;font-size:0.75em;color:var(--ink-faint);">05 이미지 스텝을 실행하세요</div>
       </div>
     </div>
+
   </div>
 
   <!-- RIGHT: Log + Output -->
@@ -721,6 +722,7 @@ body {
         <button class="sk-btn tiny" onclick="openOutputFolder()">📁 폴더</button>
         <button class="sk-btn tiny" onclick="runStep('srt')">💬 SRT</button>
         <button class="sk-btn tiny" onclick="runStep('youtube')" style="border-color:#f5a623;color:#f5a623;">🎬 YouTube</button>
+        <button class="sk-btn tiny" onclick="runStep('shorts')" style="border-color:#ff0050;color:#ff0050;">📱 Shorts</button>
       </div>
 
       <div id="ep-bar">
@@ -975,6 +977,7 @@ async function runStep(step, force = false) {
     'capcut':   ['/api/generate-capcut', () => ({})],
     'srt':      ['/api/generate-srt', () => ({})],
     'youtube':  ['/api/generate-youtube', () => ({})],
+    'shorts':   ['/api/generate-shorts',  () => ({})],
   };
   const [url, getBody] = endpoints[step] || [];
   if (!url) return;
@@ -987,6 +990,7 @@ async function runStep(step, force = false) {
   if (step === '05') { await loadGallery(); setDot('05','ok'); }
   if (step === '07') { await loadAudio(); setDot('07','ok'); setTab('audio'); }
   if (step === 'youtube') { showToast('🎬 YouTube 에셋 생성 완료! youtube/ 폴더를 확인하세요.'); }
+  if (step === 'shorts')  { showToast('📱 Shorts CapCut 배송 완료! CapCut에서 _shorts 폴더를 확인하세요.'); }
 }
 
 function streamStep(url, body) {

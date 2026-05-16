@@ -190,10 +190,13 @@ for (const tsFile of tsFiles) {
       });
     }
     // 다음 세그먼트 오프셋 = 현재 세그먼트 실제 오디오 길이 + 묵음 간격
-    // duration_sec (파일 크기 기반) 우선 사용 — ElevenLabs last-char 타임스탬프는
-    // trailing silence를 포함하지 않아 실제보다 짧게 측정되므로 드리프트 발생
-    const segDur = (seg.duration_sec > 0 ? seg.duration_sec : null)
-                ?? (ends.length > 0 ? ends[ends.length - 1] : 0);
+    // duration_sec가 ElevenLabs last_char_end보다 짧으면 잘못된 비트레이트 추정값
+    // → last_char_end + 0.3s(trailing silence 버퍼)로 보정
+    const lastEnd = ends.length > 0 ? ends[ends.length - 1] : 0;
+    const TRAILING_BUFFER = 0.3;
+    const segDur = (seg.duration_sec > 0 && seg.duration_sec >= lastEnd - 0.05)
+                ? seg.duration_sec
+                : (lastEnd > 0 ? lastEnd + TRAILING_BUFFER : 0);
     segSubOffset += segDur + silenceSec;
   }
 }

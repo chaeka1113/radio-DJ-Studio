@@ -682,6 +682,91 @@ app.post('/api/generate-capcut', (req, res) => {
   runScript(sse, 'run_06_capcut_builder.mjs').then(code => sse.done(code));
 });
 
+// ─── Shorts 파이프라인 ────────────────────────────────────────────────────────
+
+app.post('/api/generate-shorts', async (req, res) => {
+  const sse = sseStream(res);
+  const P   = getP();
+
+  // 전제조건 확인
+  const qaAudioPath = path.join(P.audio, '07_qa_and_closing.mp3');
+  if (!fs.existsSync(qaAudioPath)) {
+    sse.err('❌ Q&A 오디오 없음 — 07 TTS를 먼저 실행하세요 (--qa 플래그 필요)');
+    return sse.done(1);
+  }
+  if (!fs.existsSync(P.storyboard)) {
+    sse.err('❌ 스토리보드 없음 — 03+04 스텝을 먼저 실행하세요');
+    return sse.done(1);
+  }
+  const storyboard = JSON.parse(fs.readFileSync(P.storyboard, 'utf-8'));
+  const qaScenes   = (storyboard.scenes ?? []).filter(s => s.qa_shot === true);
+  if (qaScenes.length === 0) {
+    sse.err('❌ Q&A 씬 없음 — --qa 플래그로 파이프라인을 실행하세요');
+    return sse.done(1);
+  }
+
+  sse.log(`📱 [Shorts] Q&A 씬 ${qaScenes.length}개 감지 — 9:16 이미지 생성 시작...`);
+  const imgCode = await runScript(sse, 'run_05b_images_shorts.mjs');
+  if (imgCode !== 0) return sse.done(imgCode);
+  sse.log('✅ [Shorts] 이미지 생성 완료');
+
+  sse.log('🎞 [Shorts] CapCut Shorts 프로젝트 빌드 중...');
+  const capcutCode = await runScript(sse, 'run_06b_capcut_shorts.mjs');
+  if (capcutCode !== 0) return sse.done(capcutCode);
+  sse.log('✅ [Shorts] CapCut Shorts draft_content.json 저장 완료');
+
+  sse.done(0);
+});
+
+// ─── 단일 Q&A Shorts 생성 ────────────────────────────────────────────────────
+
+app.post('/api/generate-single-qa-short', async (req, res) => {
+  const { qaIndex } = req.body || {};
+  const sse = sseStream(res);
+
+  const n = parseInt(qaIndex, 10);
+  if (isNaN(n) || n < 1 || n > 5) {
+    sse.err('❌ qaIndex는 1~5 사이 정수여야 합니다');
+    return sse.done(1);
+  }
+
+  const P = getP();
+
+  // 전제조건 확인
+  const qaAudioPath = path.join(P.audio, '07_qa_and_closing.mp3');
+  const tsPath      = path.join(P.audio, '07_qa_and_closing_timestamps.json');
+  if (!fs.existsSync(qaAudioPath)) {
+    sse.err('❌ Q&A 오디오 없음 — 07 TTS를 먼저 실행하세요 (--qa 플래그 필요)');
+    return sse.done(1);
+  }
+  if (!fs.existsSync(tsPath)) {
+    sse.err('❌ Q&A 타임스탬프 없음 — 07 TTS를 먼저 실행하세요');
+    return sse.done(1);
+  }
+  if (!fs.existsSync(P.storyboard)) {
+    sse.err('❌ 스토리보드 없음 — 03+04 스텝을 먼저 실행하세요');
+    return sse.done(1);
+  }
+  const storyboard = JSON.parse(fs.readFileSync(P.storyboard, 'utf-8'));
+  const qaScenes   = (storyboard.scenes ?? []).filter(s => s.qa_shot === true);
+  if (qaScenes.length === 0) {
+    sse.err('❌ Q&A 씬 없음 — --qa 플래그로 파이프라인을 실행하세요');
+    return sse.done(1);
+  }
+
+  sse.log(`📱 [Q${n} Shorts] 이미지 생성 중...`);
+  const imgCode = await runScript(sse, 'run_05b_images_shorts.mjs', ['--single-qa', String(n)]);
+  if (imgCode !== 0) return sse.done(imgCode);
+  sse.log(`✅ [Q${n} Shorts] 이미지 완료`);
+
+  sse.log(`🎞 [Q${n} Shorts] CapCut 프로젝트 빌드 중...`);
+  const capcutCode = await runScript(sse, 'run_06b_capcut_shorts.mjs', ['--single-qa', String(n)]);
+  if (capcutCode !== 0) return sse.done(capcutCode);
+  sse.log(`✅ [Q${n} Shorts] draft_content.json 저장 완료`);
+
+  sse.done(0);
+});
+
 // ─── YouTube 에셋 생성 ────────────────────────────────────────────────────────
 
 app.post('/api/generate-youtube', (req, res) => {

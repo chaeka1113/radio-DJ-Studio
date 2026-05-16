@@ -407,7 +407,7 @@ async function processChunk(chunk) {
       fs.writeFileSync(segFile, audioBuffer);
       segFiles.push(segFile);
       if (alignment) {
-        const estimatedDurSec = audioBuffer.length / (128 * 1024 / 8);
+        const estimatedDurSec = audioBuffer.length / 16000; // 128kbps base-1000
         const fixedAlignment  = repairAlignment(alignment, estimatedDurSec);
         alignments.push({ label: item.label, voiceId: item.voiceId, alignment: fixedAlignment });
       }
@@ -426,8 +426,20 @@ async function processChunk(chunk) {
   let result;
   let actualSilenceSec = 0;
 
-  // 세그먼트별 실제 오디오 길이 (bytes → seconds, 128kbps MP3 기준)
-  const segDurSec = segFiles.map(f => fs.statSync(f).size / (128 * 1024 / 8));
+  // 세그먼트별 실제 오디오 길이 — ffprobe 우선, 없으면 128kbps(base-1000) 추정
+  const segDurSec = segFiles.map(f => {
+    if (HAS_FFMPEG) {
+      try {
+        const out = execSync(
+          `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${f}"`,
+          { stdio: ['pipe', 'pipe', 'pipe'] }
+        );
+        const dur = parseFloat(out.toString().trim());
+        if (dur > 0) return dur;
+      } catch {}
+    }
+    return fs.statSync(f).size / 16000; // 128kbps fallback
+  });
 
   if (HAS_FFMPEG && segFiles.length > 1 && fs.existsSync(SILENCE_FILE)) {
     // 전역 silence_1.5s.mp3를 재사용해 세그먼트 사이 묵음 삽입
