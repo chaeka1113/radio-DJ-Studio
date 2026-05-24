@@ -51,6 +51,15 @@ const scripts  = JSON.parse(fs.readFileSync(scriptsPath, 'utf-8'));
 const djScript = JSON.parse(fs.readFileSync(djPath, 'utf-8'));
 const qaScript = fs.existsSync(qaPath) ? JSON.parse(fs.readFileSync(qaPath, 'utf-8')) : null;
 
+// 스토리보드 — 씬 이미지 선택용 (없으면 master_base fallback)
+const allScenes = fs.existsSync(P.storyboard)
+  ? JSON.parse(fs.readFileSync(P.storyboard, 'utf-8')).scenes
+  : [];
+// 스토리 씬만 (DJ_SHOT 제외), globalIdx = SC###.png 번호 기준 (0-based)
+const storyScenes = allScenes
+  .map((s, i) => ({ ...s, globalIdx: i }))
+  .filter(s => s.type !== 'DJ_SHOT');
+
 // ─── 챕터 타임스탬프 계산 ─────────────────────────────────────────────────────
 function secToMmss(sec) {
   const m = Math.floor(sec / 60);
@@ -58,70 +67,87 @@ function secToMmss(sec) {
   return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
 }
 
-// 실제 오디오 timestamps JSON으로 mp3 duration 읽기
-function getAudioDuration(audioDir, stem) {
-  const tsFile = path.join(audioDir, `${stem}_timestamps.json`);
-  if (fs.existsSync(tsFile)) {
-    try {
-      const ts = JSON.parse(fs.readFileSync(tsFile, 'utf-8'));
-      const segs = ts.segments ?? [];
-      for (let i = segs.length - 1; i >= 0; i--) {
-        const ends = segs[i]?.alignment?.character_end_times_seconds ?? [];
-        if (ends.length > 0) return ends[ends.length - 1];
-      }
-    } catch {}
+// CapCut draft_content.json에서 MP3 파일별 TTS 시작 시간(초) 추출
+function readTtsStartTimes(draftPath) {
+  if (!fs.existsSync(draftPath)) return {};
+  const draft = JSON.parse(fs.readFileSync(draftPath, 'utf-8'));
+  const idToFile = {};
+  for (const a of (draft.materials?.audios ?? [])) {
+    if (a.path) idToFile[a.id] = a.path.replace(/\\/g, '/').split('/').pop();
   }
-  // fallback: estimate from mp3 file size at 128kbps
-  const mp3 = path.join(audioDir, `${stem}.mp3`);
-  if (!fs.existsSync(mp3)) return 0;
-  return fs.statSync(mp3).size / (128 * 1024 / 8);
+  const ttsStart = {};
+  for (const track of (draft.tracks ?? [])) {
+    if (track.type !== 'audio') continue;
+    for (const seg of (track.segments ?? [])) {
+      const fname = idToFile[seg.material_id];
+      if (!fname) continue;
+      const sec = seg.target_timerange.start / 1_000_000;
+      if (ttsStart[fname] === undefined || sec < ttsStart[fname])
+        ttsStart[fname] = sec;
+    }
+  }
+  return ttsStart;
 }
 
-function buildChapters(audioDir, dj, hasQa) {
-  const SILENCE = 1.5; // FFmpeg 세그먼트 간 묵음
+// 07_qa_and_closing timestamps에서 outro 시작 오프셋(초) 계산
+// 구조: intro(1 seg) + qa_pairs(qaCount × 2 seg) + outro(마지막 seg)
+function calcOutroOffset(audioDir, qaCount) {
+  const tsFile = path.join(audioDir, '07_qa_and_closing_timestamps.json');
+  if (!fs.existsSync(tsFile)) return 0;
+  const ts = JSON.parse(fs.readFileSync(tsFile, 'utf-8'));
+  const silence  = ts.silence_sec ?? 0;
+  const TRAILING = 0.3;
+  const outroIdx = 1 + qaCount * 2;  // intro(1) + qa_pairs(N×2)
+  const segs = ts.segments ?? [];
+  let cumul = 0;
+  for (let i = 0; i < Math.min(outroIdx, segs.length); i++) {
+    const s = segs[i];
+    const ends   = s?.alignment?.character_end_times_seconds ?? [];
+    const lastEnd = ends.length > 0 ? ends[ends.length - 1] : 0;
+    const segDur  = (s.duration_sec > 0 && s.duration_sec >= lastEnd - 0.05)
+      ? s.duration_sec : (lastEnd > 0 ? lastEnd + TRAILING : 0);
+    cumul += segDur + silence;
+  }
+  return cumul;
+}
+
+function buildChapters(audioDir, draftPath, dj, hasQa, qaScript) {
+  const tts = readTtsStartTimes(draftPath);
+  const t   = (f) => tts[f] ?? 0;
+
+  const LEAD     = 2.0;   // Radio noise lead-in
+  const WHITE_IN = 2.3;   // White In lead-in
+
   const eps = dj.episodes || [];
-
-  // 오디오 파일별 실제 재생 시간 수집
-  const d = {
-    opening:  getAudioDuration(audioDir, '00_opening'),
-    ep1Story: getAudioDuration(audioDir, '01_ep1_story'),
-    ep1Dj:    getAudioDuration(audioDir, '02_ep1_dj'),
-    ep2Story: getAudioDuration(audioDir, '03_ep2_story'),
-    ep2Dj:    getAudioDuration(audioDir, '04_ep2_dj'),
-    ep3Story: getAudioDuration(audioDir, '05_ep3_story'),
-    ep3Dj:    getAudioDuration(audioDir, '06_ep3_dj'),
-    qaClose:  getAudioDuration(audioDir, '07_qa_and_closing'),
-  };
-
-  console.log('📐 오디오 실측 길이(초):',
-    Object.entries(d).map(([k,v]) => `${k}=${v.toFixed(1)}`).join(', ')
-  );
-
   const chapters = [];
-  let t = 0;
 
-  chapters.push({ label: '🎙️ オープニング', time: t });
-  t += d.opening + SILENCE;
+  // 1. Opening: scene start = 0:00 (리드인 포함 전체 시작)
+  chapters.push({ label: '🎙️ オープニング', sec: 0 });
 
-  if (eps[0]) {
-    chapters.push({ label: `📖 EP1「${eps[0].title || eps[0].theme}」`, time: t });
-    t += d.ep1Story + SILENCE + d.ep1Dj + SILENCE;
-  }
-  if (eps[1]) {
-    chapters.push({ label: `📖 EP2「${eps[1].title || eps[1].theme}」`, time: t });
-    t += d.ep2Story + SILENCE + d.ep2Dj + SILENCE;
-  }
-  if (eps[2]) {
-    chapters.push({ label: `📖 EP3「${eps[2].title || eps[2].theme}」`, time: t });
-    t += d.ep3Story + SILENCE + d.ep3Dj + SILENCE;
-  }
-  const finalLabel = hasQa ? '❓ Q&A＆エンディング' : '🎵 エンディング';
-  chapters.push({ label: finalLabel, time: t });
+  // 2~4. EP1~3: scene start = TTS 시작 - WHITE_IN
+  if (eps[0]) chapters.push({ label: `📖 EP1「${eps[0].title || eps[0].theme}」`, sec: Math.max(0, t('01_ep1_story.mp3') - WHITE_IN) });
+  if (eps[1]) chapters.push({ label: `📖 EP2「${eps[1].title || eps[1].theme}」`, sec: Math.max(0, t('03_ep2_story.mp3') - WHITE_IN) });
+  if (eps[2]) chapters.push({ label: `📖 EP3「${eps[2].title || eps[2].theme}」`, sec: Math.max(0, t('05_ep3_story.mp3') - WHITE_IN) });
 
-  return chapters.map(c => `${secToMmss(Math.round(c.time))} ${c.label}`).join('\n');
+  // 5~6. Q&A / Ending
+  const closingSceneStart = Math.max(0, t('07_qa_and_closing.mp3') - LEAD);
+  if (hasQa && qaScript) {
+    chapters.push({ label: '❓ Q&Aコーナー', sec: closingSceneStart });
+    const qaCount    = (qaScript.qa_pairs || []).length;
+    const outroOffset = calcOutroOffset(audioDir, qaCount);
+    chapters.push({ label: '🎵 エンディング', sec: t('07_qa_and_closing.mp3') + outroOffset });
+  } else {
+    chapters.push({ label: '🎵 エンディング', sec: closingSceneStart });
+  }
+
+  console.log('📐 챕터 타임스탬프:');
+  chapters.forEach(c => console.log(`   ${secToMmss(Math.round(c.sec))} ${c.label}`));
+
+  return chapters.map(c => `${secToMmss(Math.round(Math.max(0, c.sec)))} ${c.label}`).join('\n');
 }
 
-const chapterText = buildChapters(P.audio, djScript, !!qaScript);
+const capcutDraftPath = path.join(P.capcut, 'draft_content.json');
+const chapterText = buildChapters(P.audio, capcutDraftPath, djScript, !!qaScript, qaScript);
 const epSummaries = (scripts.episodes || []).map(ep =>
   `EP${ep.id}「${ep.title}」— ${(ep.script || '').slice(0, 60).replace(/\n/g,' ')}…`
 ).join('\n');
@@ -168,6 +194,20 @@ function geminiRequest(prompt) {
   });
 }
 
+// 에피소드별 스토리 씬 목록 (Gemini 씬 선택용)
+const sceneListByEp = {};
+for (const s of storyScenes) {
+  const ep = s.episode_id ?? 'none';
+  if (!sceneListByEp[ep]) sceneListByEp[ep] = [];
+  sceneListByEp[ep].push(s);
+}
+const sceneListText = Object.entries(sceneListByEp).map(([ep, scenes]) => {
+  const lines = scenes.map(s =>
+    `  [idx=${s.globalIdx}] ${s.type}: ${(s.visual_prompt_en || '').slice(0, 80)}`
+  ).join('\n');
+  return `【EP${ep} シーン一覧】\n${lines}`;
+}).join('\n\n');
+
 const MARKETING_PROMPT = `
 あなたは日本のYouTubeマーケティング専門家です。
 以下は「テンキ爺の電波局」という1本のラジオ番組動画（3エピソード収録）のメタデータを生成してください。
@@ -177,6 +217,10 @@ const MARKETING_PROMPT = `
 
 【本日のエピソード一覧】
 ${epSummaries}
+
+【スト리보드シーン一覧 — thumb画像選定用】
+各シーンのidxはSC{idx+1:03d}.pngに対応する。hero_epのシーンの中からのみ選ぶこと。
+${sceneListText}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 【出力JSON構造 — このまま1つだけ返せ】
@@ -191,15 +235,18 @@ ${epSummaries}
   "title_C": "共感系・問いかけ形式・視聴者の不安を突く — 40字以内",
   "thumb_angry": {
     "main": "Hero Epの最衝撃ファクト(数字優先) — 絶対8字以内",
-    "sub": "事件の文脈を補足する一言 — 絶対12字以内"
+    "sub": "事件の文脈を補足する一言 — 絶対12字以内",
+    "scene_idx": "title_Aの衝撃・사건강조 분위기に最も合うシーンのidx(整数)"
   },
   "thumb_calm": {
     "main": "後悔・哀愁・喪失感を表す言葉 — 絶対8字以内",
-    "sub": "老後・孤独・後悔テーマの補足 — 絶対12字以内"
+    "sub": "老後・孤独・後悔テーマの補足 — 絶対12字以内",
+    "scene_idx": "title_Cの共感・감성 분위기に最も合うシーンのidx(整数)"
   },
   "thumb_surprise": {
     "main": "反転・驚き・ツンデレを表す言葉 — 絶対8字以内",
-    "sub": "視聴者の好奇心を煽る補足 — 絶対12字以内"
+    "sub": "視聴者の好奇心を煽る補足 — 絶対12字以内",
+    "scene_idx": "title_Bの反転・캐릭터 분위기に最も合うシーンのidx(整数)"
   },
   "hashtags": ["#昭和レトロ", "#人生相談", "#老後", "#毒舌ラジオ", "#テンキ爺"],
   "description_jp": "動画説明欄。Hero EPの最も衝撃的な一文(事実・数字強調)を冒頭に置くこと。絵文字込み・タイムスタンプ不要・チャンネル登録促進含む・150字以内",
@@ -216,10 +263,18 @@ ${epSummaries}
 - sub: mainの文脈補足・「〜の末路」「〜前日に発覚」「〜を知らなかった」形式推奨
 - 3種のthumb_main・subはすべて異なる切り口で書くこと(コピー禁止)
 
+【scene_idx 選定基準】
+- thumb_angry: 사건の瞬間・충격적인 표정・対立シーン優先
+- thumb_calm: 고독・후회・눈물・회상 シーン優先 (FLASHBACKタイプ推奨)
+- thumb_surprise: 반전・의외の 행동・ツンデレ 표정 シーン優先
+- 3つのscene_idxはすべて異なる値にすること
+- hero_epのシーン一覧に存在するidxのみ使用すること
+
 厳守事項:
 - JSONオブジェクト1つのみ返す(配列・複数オブジェクト禁止)
 - title_A は【】、title_B は「」で始める
 - thumb各mainは8字以内、subは12字以内・絶対厳守
+- scene_idxは整数値(文字列不可)
 - hashtags 5個固定
 - マークダウン・説明文不要・JSONのみ
 `.trim();
@@ -233,9 +288,9 @@ try {
   console.log(`   title_A:    ${meta.title_A}`);
   console.log(`   title_B:    ${meta.title_B}`);
   console.log(`   title_C:    ${meta.title_C}`);
-  console.log(`   thumb_angry:    main="${meta.thumb_angry?.main}" / sub="${meta.thumb_angry?.sub}"`);
-  console.log(`   thumb_calm:     main="${meta.thumb_calm?.main}" / sub="${meta.thumb_calm?.sub}"`);
-  console.log(`   thumb_surprise: main="${meta.thumb_surprise?.main}" / sub="${meta.thumb_surprise?.sub}"`);
+  console.log(`   thumb_angry:    main="${meta.thumb_angry?.main}" / sub="${meta.thumb_angry?.sub}" / scene_idx=${meta.thumb_angry?.scene_idx}`);
+  console.log(`   thumb_calm:     main="${meta.thumb_calm?.main}" / sub="${meta.thumb_calm?.sub}" / scene_idx=${meta.thumb_calm?.scene_idx}`);
+  console.log(`   thumb_surprise: main="${meta.thumb_surprise?.main}" / sub="${meta.thumb_surprise?.sub}" / scene_idx=${meta.thumb_surprise?.scene_idx}`);
 } catch (e) {
   console.error(`❌ Gemini 실패: ${e.message}`);
   process.exit(1);
@@ -409,13 +464,16 @@ function drawSubText(ctx, text, x, y, subSize, subColor) {
   ctx.fillText(text, x, y);
 }
 
-async function buildThumbnail({ emotion, mainText, subText, outPath, label }) {
+async function buildThumbnail({ emotion, basePath, mainText, subText, outPath, label }) {
   process.stdout.write(`🖼  ${label} 생성 중... `);
 
-  const baseFile = path.join(ASSETS_DIR, `master_base_${emotion}.png`);
-  const fallback = path.join(ASSETS_DIR, 'master_base_angry.png');
-  const baseImg  = fs.existsSync(baseFile) ? baseFile : (fs.existsSync(fallback) ? fallback : BASE_IMG);
-  const base     = await loadImage(baseImg);
+  // basePath(씬 이미지) → 없으면 master_base_{emotion} → 없으면 BASE_IMG 순으로 fallback
+  const sceneFile   = basePath && fs.existsSync(basePath) ? basePath : null;
+  const masterFile  = path.join(ASSETS_DIR, `master_base_${emotion}.png`);
+  const fallback    = path.join(ASSETS_DIR, 'master_base_angry.png');
+  const baseImg     = sceneFile ?? (fs.existsSync(masterFile) ? masterFile : (fs.existsSync(fallback) ? fallback : BASE_IMG));
+  if (sceneFile) process.stdout.write(`[씬:${path.basename(basePath)}] `);
+  const base        = await loadImage(baseImg);
 
   const canvas = createCanvas(W, H);
   const ctx    = canvas.getContext('2d');
@@ -447,10 +505,18 @@ async function buildThumbnail({ emotion, mainText, subText, outPath, label }) {
   console.log(`✅ (${emotion} / main:${mainSize}px sub:${subSize}px / ${(buf.length/1024).toFixed(0)} KB)`);
 }
 
+// scene_idx → SC###.png 경로 변환 (없으면 undefined → fallback)
+const sceneIdxToPath = (idx) => {
+  if (idx == null || idx < 0 || idx >= allScenes.length) return undefined;
+  const scNum = String(idx + 1).padStart(3, '0');
+  return path.join(P.images, `SC${scNum}.png`);
+};
+
 // 3종 썸네일 생성
 const THUMBS = [
   {
     emotion:  'angry',
+    basePath: sceneIdxToPath(meta.thumb_angry?.scene_idx),
     mainText: meta.thumb_angry?.main   ?? '衝撃の事実',
     subText:  meta.thumb_angry?.sub    ?? 'テンキ爺が斬る',
     outPath:  path.join(YOUTUBE_DIR, 'thumb_angry.png'),
@@ -458,6 +524,7 @@ const THUMBS = [
   },
   {
     emotion:  'calm',
+    basePath: sceneIdxToPath(meta.thumb_calm?.scene_idx),
     mainText: meta.thumb_calm?.main    ?? 'もう遅い...',
     subText:  meta.thumb_calm?.sub     ?? '老後の孤独と絶望',
     outPath:  path.join(YOUTUBE_DIR, 'thumb_calm.png'),
@@ -465,6 +532,7 @@ const THUMBS = [
   },
   {
     emotion:  'surprise',
+    basePath: sceneIdxToPath(meta.thumb_surprise?.scene_idx),
     mainText: meta.thumb_surprise?.main ?? 'まさかの真実',
     subText:  meta.thumb_surprise?.sub  ?? '定年前日に判明',
     outPath:  path.join(YOUTUBE_DIR, 'thumb_surprise.png'),

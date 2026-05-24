@@ -20,6 +20,29 @@ import fs from 'fs';
 import { loadEnv, requireEnv } from './lib/env.mjs';
 import { generateEpId, makePaths, ensureDirs } from './lib/paths.mjs';
 
+// JSON 문자열 내 비이스케이프 제어문자·후행 쉼표를 복구하는 경량 파서
+function repairJson(str) {
+  // 1. 후행 쉼표 제거
+  str = str.replace(/,(\s*[}\]])/g, '$1');
+  // 2. 문자열 값 내 리터럴 제어문자를 이스케이프 (일본어 인용구 줄바꿈 대응)
+  let out = '';
+  let inStr = false;
+  let esc = false;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (esc) { out += ch; esc = false; continue; }
+    if (ch === '\\' && inStr) { out += ch; esc = true; continue; }
+    if (ch === '"') { inStr = !inStr; out += ch; continue; }
+    if (inStr) {
+      if (ch === '\n') { out += '\\n'; continue; }
+      if (ch === '\r') { out += '\\r'; continue; }
+      if (ch === '\t') { out += '\\t'; continue; }
+    }
+    out += ch;
+  }
+  return out;
+}
+
 loadEnv();
 const epId = process.env.EP_ID ?? generateEpId();
 const P    = makePaths(epId);
@@ -266,8 +289,14 @@ ${r.script || '(없음)'}
           try {
             scored = JSON.parse(raw);
             break;
-          } catch (parseErr) {
-            console.warn(`   EP${r.id} 루브릭 채점 시도 ${attempt}/3: JSON 파싱 실패 (${parseErr.message})`);
+          } catch {
+            try {
+              scored = JSON.parse(repairJson(raw));
+              console.log(`   EP${r.id} 루브릭 채점 시도 ${attempt}/3: JSON 복구 후 파싱 성공`);
+              break;
+            } catch (parseErr) {
+              console.warn(`   EP${r.id} 루브릭 채점 시도 ${attempt}/3: JSON 파싱 실패 (${parseErr.message})`);
+            }
           }
         }
         if (scored) {

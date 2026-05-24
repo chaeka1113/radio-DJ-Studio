@@ -1111,10 +1111,6 @@ function validateTimeline(draft) {
 validateTimeline(newDraft);
 validate(newDraft);
 
-// ─── 저장 (기존: capcut_output/) ─────────────────────────────────────────────
-fs.mkdirSync(OUTPUT_DIR, { recursive: true });
-fs.writeFileSync(OUTPUT_PATH, JSON.stringify(newDraft, null, 2), 'utf-8');
-
 // ─── 라우팅: CapCut 드래프트 폴더로 직접 배송 ────────────────────────────────
 {
   const DRAFTS_DIR = process.env.CAPCUT_DRAFTS_DIR;
@@ -1161,6 +1157,10 @@ fs.writeFileSync(OUTPUT_PATH, JSON.stringify(newDraft, null, 2), 'utf-8');
 
   // 5. 알맹이 동기화 (newDraft.id에 동일 UUID 주입)
   newDraft.id = rootUUID;
+
+  // run_08 소스(.output/capcut/)도 rootUUID로 저장 — UUID 일치 보장
+  fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+  fs.writeFileSync(OUTPUT_PATH, JSON.stringify(newDraft, null, 2), 'utf-8');
 
   // 6. 최종 배송
   fs.writeFileSync(
