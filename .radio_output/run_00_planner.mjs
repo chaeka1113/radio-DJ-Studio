@@ -46,8 +46,8 @@ if (fs.existsSync(P.qaResult)) {
 const mzEpNum = includeMz ? Math.floor(Math.random() * 3) + 1 : null;
 if (includeMz) console.log(`🔥 MZ 모드 ON — EP${mzEpNum}를 10~30대 사연자로 계획`);
 
-// 빌런 확률 결정 (60% 확률, 발생 시 EP1~3 랜덤 배정)
-const VILLAIN_PROB = 0.3;
+// 빌런 확률 결정 (35% 확률, 발생 시 EP1~3 랜덤 배정)
+const VILLAIN_PROB = 0.35;
 const villainOccurs = Math.random() < VILLAIN_PROB;
 const villainEpNum = villainOccurs ? Math.floor(Math.random() * 3) + 1 : null;
 if (villainOccurs) console.log(`🔴 빌런 발생 — EP${villainEpNum}에 사연자 본인이 빌런(가해자) 배정`);
@@ -154,7 +154,7 @@ Q&A 모드: ${includeQna ? 'ON' : 'OFF'}
       "forbidden_drift": ["이탈 패턴 예시1"],
       "villain_required": false,
       "villain_archetype": null,
-      "script_length_range": "800〜1000文字",
+      "script_length_range": "700〜1000文字",
       "narrative_arc": {
         "setup": "주인공과 상황 설정 (50字 이내 일본어)",
         "incident": "발단이 되는 사건 (50字 이내 일본어)",

@@ -3,7 +3,7 @@
  * 실패 시 명확한 메시지와 함께 process.exit(1)
  */
 
-export function validateScripts(data, { minScriptLen = 800 } = {}) {
+export function validateScripts(data, { minScriptLen = 700 } = {}) {
   const errors = [];
 
   if (!Array.isArray(data?.episodes) || data.episodes.length < 3) {

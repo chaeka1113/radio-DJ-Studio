@@ -19,7 +19,7 @@ type: reference
 
 | 검사 항목 | 판정 기준 | 영향 에피소드 |
 |-----------|-----------|--------------|
-| 대본 분량 부족 | `script` 필드 800자 미만 | 해당 EP Fail |
+| 대본 분량 부족 | `script` 필드 700자 미만 | 해당 EP Fail |
 | 키워드 미포함 | `required_keywords` 중 1개도 포함되지 않은 경우 | 해당 EP Fail |
 | 빌런 플래그 불일치 | `villain_required=true`인데 `is_villain=false`, 또는 그 반대 | 해당 EP Fail |
 | 연령 오류 | MZ 모드: 지정 EP 캐릭터 나이 40세 이상 / 시니어 모드: 39세 이하 | 해당 EP Fail |

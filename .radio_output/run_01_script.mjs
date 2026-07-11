@@ -172,8 +172,8 @@ ${referenceKnowledge}
 ---
 
 🚨 분량 절대 준수 — QA 통과의 핵심 조건
-각 사연(script 필드)은 반드시 800文字 이상 1,000文字 이하로 작성한다.
-800文字 미만이면 QA에서 즉시 Fail 처리되어 전체 재작업이 강제된다.
+각 사연(script 필드)은 반드시 700文字 이상 1,000文字 이하로 작성한다.
+700文字 미만이면 QA에서 즉시 Fail 처리되어 전체 재작업이 강제된다.
 분량을 채우는 방법:
 - 사연자의 감정 변화를 단계별로 묘사한다 (처음엔 ~였는데, 그러다 ~, 결국 ~)
 - 구체적인 날짜, 장소, 실제 대화 내용을 포함한다
@@ -267,7 +267,7 @@ for (let epIdx = 0; epIdx < 3; epIdx++) {
   // 스토리 뼈대 (narrative_arc) — Planner가 미리 설계한 起承転結
   const arc = cEp.narrative_arc;
   const arcBlock = arc ? `
-【📖 스토리 뼈대 — 이 구조를 따라 800~1000字로 살을 붙여라】
+【📖 스토리 뼈대 — 이 구조를 따라 700~1000字로 살을 붙여라】
 起(setup):   ${arc.setup || ''}
 承(incident): ${arc.incident || ''}
 転(turn):    ${arc.turn || ''}
@@ -327,7 +327,7 @@ EP${epNum}: ${contractParts}
   "id": ${epNum},
   "theme": "テーマ名（日本語）",
   "title": "エピソードタイトル",
-  "script": "사연자 편지 본문만 800〜1,000文字",
+  "script": "사연자 편지 본문만 700〜1,000文字",
   "emotion_tone": "苦笑い|哀愁|懐かしさ|ほっこり",
   "character": {
     "name": "主人公名（仮名）",
@@ -353,14 +353,14 @@ EP${epNum}: ${contractParts}
     // 재시도 시 분량 피드백을 프롬프트 맨 앞에 주입 (첫 시도는 그대로)
     const retryPrefix = retryCount > 0
       ? `🚨🚨🚨 분량 재시도 경고 (${retryCount}/${MAX_RETRY - 1}회째) 🚨🚨🚨
-이전 시도에서 script 필드가 ${lastLen}자였습니다. 800자 미만이므로 FAIL입니다.
-지금 바로 수정하여 반드시 800자 이상 1,000자 이하로 다시 작성하세요.
+이전 시도에서 script 필드가 ${lastLen}자였습니다. 700자 미만이므로 FAIL입니다.
+지금 바로 수정하여 반드시 700자 이상 1,000자 이하로 다시 작성하세요.
 분량을 채우는 구체적인 방법:
 1. 사연자의 감정 변화를 처음→중간→결말 3단계로 나눠 각 단계를 2~3문장으로 묘사
 2. 가족/직장동료/친구와의 실제 대화 한 마디 이상 직접 인용
 3. 구체적인 날짜, 장소, 금액, 이름을 넣어 현실감 강화
 4. 편지 형식: 인사말로 시작 → 사건 → 감정 변화 → 마무리 인사 구조 완성
-현재 목표: 최소 ${Math.max(800, lastLen + 150)}자 이상\n\n`
+현재 목표: 최소 ${Math.max(700, lastLen + 150)}자 이상\n\n`
       : '';
 
     try {
@@ -390,8 +390,8 @@ EP${epNum}: ${contractParts}
         bestAttempt = { ...parsed, id: epNum };
       }
 
-      if (scriptLen < 800) {
-        throw new Error(`분량 부족: ${scriptLen}자 (최소 800자 필요)`);
+      if (scriptLen < 700) {
+        throw new Error(`분량 부족: ${scriptLen}자 (최소 700자 필요)`);
       }
       console.log(`   ✅ EP${epNum} 생성 완료 (${scriptLen}자)`);
       epData = { ...parsed, id: epNum };

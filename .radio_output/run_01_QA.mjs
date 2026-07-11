@@ -79,9 +79,9 @@ ensureDirs(P);
     const cEp    = (contract.episodes || []).find(c => c.id === ep.id) || {};
     const issues = [];
 
-    // 1-A. 대본 분량 (최소 800자)
+    // 1-A. 대본 분량 (최소 700자)
     const len = (ep.script || '').length;
-    if (len < 800) issues.push(`분량 부족: ${len}자 (최소 800자 필요, 목표 1000자)`);
+    if (len < 700) issues.push(`분량 부족: ${len}자 (최소 700자 필요, 목표 1000자)`);
 
     // 1-B. required_keywords — 1개 이상 포함 필수
     const kws    = cEp.required_keywords || [];

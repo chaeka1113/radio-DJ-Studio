@@ -93,7 +93,7 @@ cd /c/radio-dj-studio && node .radio_output/run_00_trend_fetcher.mjs
 
 ---
 
-## STEP 1 — 대본 생성 (800~1,000文字/편)
+## STEP 1 — 대본 생성 (700~1,000文字/편)
 **에이전트:** `.claude/agents/01_script_writer.md`
 
 ```bash
@@ -212,7 +212,7 @@ cd /c/radio-dj-studio && node server.mjs
 QA 모드: [ON/OFF]
 
 📁 .radio_output/
-├── 01_scripts.json            ← 대본 3편 (800~1000文字)
+├── 01_scripts.json            ← 대본 3편 (700~1000文字)
 ├── 02_dj_script.json          ← 오프닝/리액션/트랜지션/엔딩
 ├── 03_character_prompts.json  ← 캐릭터 고정 시드
 ├── 04_storyboard.json         ← 씬 flat 배열 (시드 삽입 완료)

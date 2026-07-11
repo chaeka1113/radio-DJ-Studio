@@ -4,7 +4,14 @@
       "Bash(grep -h \"^description:\" /c/radio-dj-studio/.claude/agents/*.md)",
       "Bash(node:*)",
       "Bash(netstat -ano)",
-      "Bash(curl -s http://localhost:3000/api/data/scripts)"
+      "Bash(curl -s http://localhost:3000/api/data/scripts)",
+      "mcp__visualize__read_me",
+      "mcp__visualize__show_widget",
+      "WebFetch(domain:youtube.com)",
+      "WebSearch",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(curl -s \"https://api.github.com/repos/suttacentral/bilara-data/contents/root/pli/ms/sutta/kn/dhp?ref=published\")",
+      "Bash(EP_ID=EP_TEST node scripts/run_01_select.mjs --chapter 3)"
     ],
     "defaultMode": "bypassPermissions"
   }

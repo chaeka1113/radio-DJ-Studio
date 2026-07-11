@@ -388,16 +388,17 @@ const THUMB_CONFIG = {
   // 레이아웃
   SUB_GAP:      16,           // main 하단 ~ sub 상단 간격(px) — 이 간격의 중간점이 이미지 Y 정중앙
   // 3단 레이어 렌더링 파라미터
-  STROKE_RATIO: 0.15,         // stroke lineWidth = fontSize × 이 값
-  STROKE_MIN:   15,           // stroke 최소값(px) — 작은 폰트에서도 굵게
+  STROKE_RATIO: 0.20,         // stroke lineWidth = fontSize × 이 값 — 굵은 고딕체 느낌
+  STROKE_MIN:   22,           // stroke 최소값(px) — 작은 폰트에서도 굵게
   SHADOW_BLUR:  22,
   SHADOW_X:     6,
   SHADOW_Y:     6,
   // 감정별 색상 팔레트 (A/B 테스트 시 여기만 수정)
+  // grad[0] = 그라디언트 시작 X비율 — 0.667이면 이미지 오른쪽 1/3 구간에 색 오버레이
   EMOTION_PALETTE: {
-    angry:    { main: '#FFD700', sub: '#FF8C00', grad: [0.35, 'rgba(60,0,0,0.85)',  'rgba(20,0,0,0.95)']  },
-    calm:     { main: '#A8D8FF', sub: '#D0ECFF', grad: [0.35, 'rgba(0,20,60,0.85)', 'rgba(0,10,40,0.95)'] },
-    surprise: { main: '#ADFFA8', sub: '#FFFFA0', grad: [0.35, 'rgba(0,40,20,0.85)', 'rgba(0,20,10,0.95)'] },
+    angry:    { main: '#FFC700', sub: '#FF7A00', grad: [0.667, 'rgba(60,0,0,0.75)',  'rgba(20,0,0,0.88)']  },
+    calm:     { main: '#3DC8FF', sub: '#B8ECFF', grad: [0.667, 'rgba(0,20,60,0.75)', 'rgba(0,10,40,0.88)'] },
+    surprise: { main: '#4CFF57', sub: '#FFFF66', grad: [0.667, 'rgba(0,40,20,0.75)', 'rgba(0,20,10,0.88)'] },
   },
 };
 
