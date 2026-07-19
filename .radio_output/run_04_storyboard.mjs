@@ -165,6 +165,8 @@ Output JSON array only:
       if (!jsonMatch) throw new Error('JSON 배열 없음');
       scenes = JSON.parse(jsonMatch[0]);
       if (!Array.isArray(scenes) || scenes.length === 0) throw new Error('씬 배열이 비어있음');
+      const badIdx = scenes.findIndex(s => typeof s.visual_prompt_en !== 'string' || !s.visual_prompt_en);
+      if (badIdx !== -1) throw new Error(`씬 ${badIdx}번에 visual_prompt_en 누락`);
       break;
     } catch (err) {
       console.warn(`   ⚠️ EP${ep.id} 시도 ${attempt + 1}/3 실패: ${err.message}`);

@@ -47,9 +47,10 @@ const qaPath       = P.qaScript;
 if (!fs.existsSync(scriptsPath)) { console.error('❌ 01_scripts.json 없음'); process.exit(1); }
 if (!fs.existsSync(djPath))      { console.error('❌ 02_dj_script.json 없음'); process.exit(1); }
 
-const scripts  = JSON.parse(fs.readFileSync(scriptsPath, 'utf-8'));
-const djScript = JSON.parse(fs.readFileSync(djPath, 'utf-8'));
-const qaScript = fs.existsSync(qaPath) ? JSON.parse(fs.readFileSync(qaPath, 'utf-8')) : null;
+const scripts   = JSON.parse(fs.readFileSync(scriptsPath, 'utf-8'));
+const djScript  = JSON.parse(fs.readFileSync(djPath, 'utf-8'));
+const qaScript  = fs.existsSync(qaPath) ? JSON.parse(fs.readFileSync(qaPath, 'utf-8')) : null;
+const qaResult  = fs.existsSync(P.qaResult) ? JSON.parse(fs.readFileSync(P.qaResult, 'utf-8')) : null;
 
 // 스토리보드 — 씬 이미지 선택용 (없으면 master_base fallback)
 const allScenes = fs.existsSync(P.storyboard)
@@ -208,6 +209,51 @@ const sceneListText = Object.entries(sceneListByEp).map(([ep, scenes]) => {
   return `【EP${ep} シーン一覧】\n${lines}`;
 }).join('\n\n');
 
+// ─── Hero EP 정량 시그널 계산 (클릭률 판단 근거자료 — Gemini 참고용, 자동선정 아님) ──
+const SHOCK_KEYWORDS = [
+  '詐欺', '借金', '遺産', '認知症', '孤独死', '裏切り', '離婚', '浮気', '横領', '盗難',
+  '逮捕', '失踪', '家出', '絶縁', '破産', '事故', '死亡', '危険', '特定', '炎上',
+  '脅迫', 'ストーカー', '退職金', '財産', '入院', '骨折', '喪失',
+];
+const NUMBER_RE = /\d[\d,]*\s*(?:円|万円|億円|万|億|％|%|歳|年間)/g;
+
+function countHits(text, words) {
+  return words.reduce((n, w) => n + (text.split(w).length - 1), 0);
+}
+
+const episodeSignals = (scripts.episodes || []).map(ep => {
+  const text        = ep.script || '';
+  const rubric       = qaResult?.episodes?.find(e => String(e.id) === String(ep.id));
+  const numberHits   = (text.match(NUMBER_RE) || []).length;
+  const keywordHits  = countHits(text, SHOCK_KEYWORDS);
+  const epScenes     = storyScenes.filter(s => String(s.episode_id) === String(ep.id));
+  const flashbackCnt = epScenes.filter(s => s.type === 'FLASHBACK').length;
+
+  return {
+    id: ep.id, title: ep.title,
+    rubric_score: rubric?.rubric_score ?? null,
+    number_hits: numberHits,
+    keyword_hits: keywordHits,
+    is_villain: !!ep.character?.is_villain,
+    scene_count: epScenes.length,
+    flashback_count: flashbackCnt,
+  };
+});
+
+const signalsText = episodeSignals.map(s =>
+  `EP${s.id}「${s.title}」\n` +
+  `  - 台本品質スコア(rubric_score): ${s.rubric_score ?? '未測定'}/100\n` +
+  `  - 具体的な数値・金額の言及: ${s.number_hits}回\n` +
+  `  - 衝撃キーワードのヒット数: ${s.keyword_hits}回\n` +
+  `  - 対立構造(villain)の有無: ${s.is_villain ? 'あり' : 'なし'}\n` +
+  `  - サムネ素材シーン数: 計${s.scene_count}個（うちFLASHBACK ${s.flashback_count}個）`
+).join('\n\n');
+
+console.log('\n📊 Hero EP 정량 시그널:');
+episodeSignals.forEach(s => console.log(
+  `   EP${s.id}: rubric=${s.rubric_score ?? '-'} number=${s.number_hits} keyword=${s.keyword_hits} villain=${s.is_villain} scenes=${s.scene_count}(FB${s.flashback_count})`
+));
+
 const MARKETING_PROMPT = `
 あなたは日本のYouTubeマーケティング専門家です。
 以下は「テンキ爺の電波局」という1本のラジオ番組動画（3エピソード収録）のメタデータを生成してください。
@@ -217,6 +263,10 @@ const MARKETING_PROMPT = `
 
 【本日のエピソード一覧】
 ${epSummaries}
+
+【エピソード別 定量シグナル — Hero EP選定の参考データ】
+これは自動選定ルールではなく、判断の裏付けとして使う数値データ。物語としての感情的インパクトを最優先しつつ、以下の数値も判断材料に加えること。
+${signalsText}
 
 【スト리보드シーン一覧 — thumb画像選定用】
 各シーンのidxはSC{idx+1:03d}.pngに対応する。hero_epのシーンの中からのみ選ぶこと。
@@ -228,7 +278,7 @@ ${sceneListText}
 {
   "hero_ep": {
     "id": "最も視聴者の感情を動かすエピソードのID (1/2/3)",
-    "reason": "選んだ理由を日本語で一文"
+    "reason": "選んだ理由を日本語で一文。定量シグナル(rubric_score/数値言及/衝撃キーワード/villain有無/シーン数)のうち根拠にした項目を具体的数値付きで最低1つ言及すること"
   },
   "title_A": "【衝撃系】Hero Epの具体的数字/事件+テンキ爺の毒舌 — 40字以内・必ず【】始まり",
   "title_B": "「キャラ台詞系」テンキ爺の口調で視聴者に直接ツッコミ — 40字以内・必ず「」始まり",
@@ -257,6 +307,8 @@ ${sceneListText}
 1순위: 具体的な金額損失・詐欺・退職金喪失など数字で表現できる事件
 2순위: 家族・嫁姑・職場の裏切り/理不尽で感情が激化するもの
 3순위: 孤独・後悔・老後の喪失感で共感性が高いもの
+
+上記の優先順位はあくまで物語内容の判断基準。同点・僅差で迷った場合のみ「エピソード別 定量シグナル」を tie-breaker として使うこと（rubric_scoreが著しく低い＝完成度に難あり、衝撃キーワード/数値言及が多い＝サムネの言葉にしやすい、シーン数が少ない＝サムネ素材が不足、を考慮）。定量シグナルだけを理由に物語として弱いエピソードを選んではならない。
 
 【thumb テキスト品質基準】
 - main: インパクト最優先・数字があれば必ず入れる・句読点なし
@@ -297,7 +349,7 @@ try {
 }
 
 // marketing_meta.json 저장
-const marketingMeta = { ...meta, chapters: chapterText, generated_at: new Date().toISOString() };
+const marketingMeta = { ...meta, episode_signals: episodeSignals, chapters: chapterText, generated_at: new Date().toISOString() };
 fs.writeFileSync(path.join(YOUTUBE_DIR, 'marketing_meta.json'), JSON.stringify(marketingMeta, null, 2), 'utf-8');
 console.log('✅ marketing_meta.json 저장 완료');
 
