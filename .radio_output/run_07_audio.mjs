@@ -51,13 +51,13 @@ if (!ELEVENLABS_API_KEY) {
   console.error('❌ ELEVENLABS_API_KEY 환경변수 없음 — .env 파일 확인');
   process.exit(1);
 }
-const DJ_VOICE_ID = 'm0Fo0JrIVm57nweV2EuR';
+const DJ_VOICE_ID = 'DfTyPP1R35toM6FcPBCI';
 
 const CALLER_VOICE_POOLS = {
   elderly_female: ['TTFPf9GdFfg1WOEncIAI', 'B2hIadtwF0bAORTkJkOs', 'MXKtCrra8fvlDUbfKUT1', 'ozfS3gQtjFX3kQyJ12dX', 'BEpnUAbmbxOaW1cCYscA'],
   middle_female:  ['GR4dBIFsYe57TxyrHKXz', 'q3eHxuMah31iifOfMrz0', 'mN6r4VCXacoTliYLh0A2', 'c2XJrw7TvNGtOc6r0ijG', 'T7yYq3WpB94yAuOXraRi'],
   young_female:   ['fUjY9K2nAIwlALOwSiwc', '3321Alera3fXjEWjjbAX', 'JTlYtJrcTzPC71hMLOxo', 'ugYcuAusTuWCSOpJD0Xd', 'dhGvgIx0X6G3xzSWqOye'],
-  elderly_male:   ['QH5PYulAezU4H8VXwlJx', '8BU0fsFBiPt1cbGZ5lK9', '9NgkqGk9ImCns5ZyAIzN', 'l5KWIFmhhsVdaYchBLIn', '8FuuqoKHuM48hIEwni5e', 'C8e2F6Cm3l58PjXaVpUW'],
+  elderly_male:   ['8BU0fsFBiPt1cbGZ5lK9', '9NgkqGk9ImCns5ZyAIzN', 'l5KWIFmhhsVdaYchBLIn', '8FuuqoKHuM48hIEwni5e', 'C8e2F6Cm3l58PjXaVpUW'],
   middle_male:    ['QVEG0HcMh8UIG8OE5Zrv', '2UGDsJpBJAiAlF0jQQ7x', 'qaCSabKToUUT4sTqBZtz', 'vzIXwvf41vKosKu00hYj'],
   young_male:     ['6XNSYkDqZ1blajSVtPok', 'nZyvxotzaGDEPIaigNEe', 'TzUI53GPXnGDRdeLAWZ4', 'XY4FsKJKqXdAJVWFqSit', 'aeFr7JZaVm2rwnkGfuP3'],
 };
@@ -571,8 +571,19 @@ for (const chunk of audioChunks) {
 }
 
 // 매니페스트 저장 (영상 파이프라인에서 청크 목록/메타데이터 참조용)
-fs.writeFileSync(P.audioManifest, JSON.stringify(manifest, null, 2), 'utf-8'); updateStage(P, 'audio_done');
+fs.writeFileSync(P.audioManifest, JSON.stringify(manifest, null, 2), 'utf-8');
 console.log('📋 09_audio_manifest.json 저장 완료 (영상 파이프라인 연동용)');
+
+// 누락 청크가 있으면 audio_done 금지 — 재실행 시 스킵 로직으로 누락분만 재생성
+const doneIds    = new Set(manifest.chunks.map(c => c.id));
+const missingIds = audioChunks.map(c => c.id).filter(id => !doneIds.has(id));
+if (missingIds.length > 0) {
+  console.error(`\n❌ 오디오 청크 ${missingIds.length}/${audioChunks.length}개 누락: ${missingIds.join(', ')}`);
+  console.error('   stage를 audio_done으로 올리지 않음 — 원인 해결 후 재실행하세요');
+  fs.rmSync(GLOBAL_TMP_DIR, { recursive: true, force: true });
+  process.exit(1);
+}
+updateStage(P, 'audio_done');
 
 // ── 가비지 컬렉션: 전역 임시 파일 삭제 ──────────────────────────────────────
 try {

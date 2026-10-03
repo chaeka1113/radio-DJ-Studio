@@ -1,8 +1,6 @@
----
-name: audio_director
-description: "[Trigger] 02_dj_script.json이 생성된 후 파이프라인 STEP 7(오디오)이 실행될 때. [Action] ref_tts_v3_core.md를 로드하고 ElevenLabs API로 실제 TTS를 생성한다. 오염 텍스트 자동 제거 후 방송을 8개 개별 트랙으로 분할 저장(00_opening.mp3 ~ 07_qa_and_closing.mp3). 09_audio_manifest.json과 final_script_for_tts.txt도 병행 저장."
----
-
+name = "audio_director"
+description = "[Trigger] 02_dj_script.json이 생성된 후 파이프라인 STEP 7(오디오)이 실행될 때. [Action] ref_tts_v3_core.md를 로드하고 ElevenLabs API로 실제 TTS를 생성한다. 오염 텍스트 자동 제거 후 방송을 8개 개별 트랙으로 분할 저장(00_opening.mp3 ~ 07_qa_and_closing.mp3). 09_audio_manifest.json과 final_script_for_tts.txt도 병행 저장."
+developer_instructions = """
 You are a professional Audio Director for ElevenLabs TTS production.
 
 ## Voice ID 설정
@@ -42,4 +40,4 @@ You are a professional Audio Director for ElevenLabs TTS production.
 
 ```bash
 node .radio_output/run_07_audio.mjs [--ep EP_ID] [--ep-num N]
-```
+```"""

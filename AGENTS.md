@@ -27,3 +27,7 @@ Fail(85점 미만) → `01_qa_feedback.json` → 재작업 프롬프트 주입 �
 ## 경로 규약
 모든 파일 경로는 `lib/paths.mjs`의 `makePaths(epId)` 반환값으로만 참조.
 에이전트 정의는 `.claude/agents/0N_*.md`, 실제 실행은 `run_*.mjs`.
+
+## Imported Claude Cowork project instructions
+
+youtube 라디오 채널 자동화 프로젝트

@@ -11,7 +11,16 @@
       "WebSearch",
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(curl -s \"https://api.github.com/repos/suttacentral/bilara-data/contents/root/pli/ms/sutta/kn/dhp?ref=published\")",
-      "Bash(EP_ID=EP_TEST node scripts/run_01_select.mjs --chapter 3)"
+      "Bash(EP_ID=EP_TEST node scripts/run_01_select.mjs --chapter 3)",
+      "PowerShell(node -e \"const d=require\\('./.output/EP_22_youtube/02_dj_script.json'\\);for\\(const e of d.episodes\\)console.log\\(e.id,e.character?.name,e.character?.age,e.character?.gender\\)\")",
+      "PowerShell($env:EP_ID = 'EP_22_youtube'; node .radio_output/run_07_audio.mjs)",
+      "PowerShell(Get-Content \"C:\\\\Users\\\\채결사\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--radio-dj-studio\\\\33d59501-5b3d-40a1-95fd-5c9c0d9c6d5b\\\\tasks\\\\buf9qzx17.output\" | Select-String \"01_ep1|❌|ep1|ep2|ep3\"; Get-ChildItem .output/EP_22_youtube/audio | Select-Object Name, Length | Format-Table -AutoSize; \\(Get-Content .output/EP_22_youtube/09_audio_manifest.json | ConvertFrom-Json\\).chunks.Count)",
+      "PowerShell($env:EP_ID = 'EP_22_youtube'; node .radio_output/run_06_capcut_builder.mjs; if \\($LASTEXITCODE -eq 0\\) { Write-Output '===== run_08 ====='; node .radio_output/run_08_srt.mjs; Write-Output \"run_08 exit $LASTEXITCODE\" } else { Write-Output \"run_06 FAILED exit $LASTEXITCODE\" })",
+      "PowerShell(Set-Location C:\\\\radio-dj-studio; $env:EP_ID = 'EP_22_youtube'; node .radio_output/run_09_youtube.mjs; Write-Output \"run_09 exit $LASTEXITCODE\")",
+      "PowerShell($env:EP_ID = 'EP_22_youtube'; node .radio_output/run_99_wrapup.mjs; Write-Output \"run_99 exit $LASTEXITCODE\"; git diff --stat .claude/skills/ref_learnings.md)",
+      "PowerShell(node --check .radio_output/run_07_audio.mjs; Write-Output \"syntax exit $LASTEXITCODE\"; node -e \"console.log\\(require\\('./.output/EP_22_youtube/manifest.json'\\).stage\\)\")",
+      "PowerShell(Get-ChildItem *)",
+      "PowerShell(git ls-files draft_content_마스터_.json; git log --oneline -3 -- draft_content_마스터_.json; node -e \"const t=require\\('./draft_content_마스터_.json'\\);console.log\\(t.materials.video_effects.map\\(e=>e.name+'\\('+e.effect_id+'\\)'\\).join\\(', '\\)\\);console.log\\('stickers',t.materials.stickers.map\\(s=>s.name\\)\\)\")"
     ],
     "defaultMode": "bypassPermissions"
   }

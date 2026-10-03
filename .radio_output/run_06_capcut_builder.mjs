@@ -7,7 +7,7 @@
  * STEP 2  : anchor 계산 (chunk 위치)
  * STEP 3  : 씬 timeline 계산 (sentence boundary 기반 duration)
  * STEP 4  : 비디오 세그먼트 빌드 (Ken Burns: scale only)
- * STEP 5  : 이펙트 / 스티커 빌드 (EP_MAP story_end 기준)
+ * STEP 5  : 이펙트 빌드 (EP_MAP story_end 기준)
  * STEP 6  : 오디오 트랙 빌드 (radio_noise / pc_click / bgm / TTS)
  * STEP 7  : 조립 + 검증 + 저장
  */
@@ -57,7 +57,6 @@ const template = JSON.parse(fs.readFileSync(P.capcutTemplate, 'utf-8'));
 const tmats    = template.materials;
 
 // ─── 템플릿에서 정적 소재 추출 ────────────────────────────────────────────────
-const T_STICKER    = tmats.stickers[0];
 const RETRO_FLICKER_EFFECT_ID = '7618619632592620805';
 const _retroFlicker = tmats.video_effects.find(e => e.effect_id === RETRO_FLICKER_EFFECT_ID);
 if (!_retroFlicker) {
@@ -68,11 +67,32 @@ if (!_retroFlicker) {
 }
 const ACTIVE_FLICKER_ID = RETRO_FLICKER_EFFECT_ID;
 
+// 빈티지 결함 — 유료 전환된 80년대 테이프(리드인)·노이즈 아웃(아웃트로) 대체 (EP_22 수동 편집본 기준)
+// 마스터 템플릿에 없으므로 CapCut 편집본에서 추출한 소재를 직접 정의
+const VINTAGE_GLITCH_EFFECT_ID = '7623843071922310417';
+const VINTAGE_GLITCH_MAT = tmats.video_effects.find(e => e.effect_id === VINTAGE_GLITCH_EFFECT_ID) ?? {
+  id: newUUID(), effect_id: VINTAGE_GLITCH_EFFECT_ID, resource_id: VINTAGE_GLITCH_EFFECT_ID,
+  name: '빈티지 결함', type: 'video_effect', sub_type: 0, bind_segment_id: '', transparent_params: '',
+  path: 'C:/Users/채결사/AppData/Local/CapCut/User Data/Cache/effect/7623843071922310417/8a934825dc49216cf52d1d48848effdc',
+  value: 1, category_id: '18885', category_name: '인기', platform: 'all',
+  apply_target_type: 2, source_platform: 1, version: '', item_effect_type: 0,
+  adjust_params: [
+    { name: 'effects_adjust_speed',     value: 0.33333333333333, default_value: 0.33333333333333 },
+    { name: 'effects_adjust_size',      value: 0, default_value: 0 },
+    { name: 'effects_adjust_intensity', value: 1, default_value: 1 },
+  ],
+  time_range: null, formula_id: '', apply_time_range: null, render_index: 0, track_render_index: 0,
+  common_keyframes: [], request_id: '', algorithm_artifact_path: '', disable_effect_faces: [],
+  covering_relation_change: 0, enable_mask: true, effect_mask: [],
+  enable_video_mask_stroke: true, enable_video_mask_shadow: true,
+  aigc_current_artifact_path: '', aigc_current_artifact_cnt: 0,
+  aigc_current_artifact_freeze_time: -1, aigc_current_artifact_freeze_progress: 0, sdk_extra: '',
+};
+
 const T_VE = {
-  RETRO_FLICKER: _retroFlicker,
-  NOISE_OUT:   tmats.video_effects.find(e => e.effect_id === '7582441563750534453'),
-  WHITE_IN:    tmats.video_effects.find(e => e.effect_id === '7399466630230609157'),
-  TAPE_80S:    tmats.video_effects.find(e => e.effect_id === '7414191309986090245'),
+  RETRO_FLICKER:  _retroFlicker,
+  WHITE_IN:       tmats.video_effects.find(e => e.effect_id === '7399466630230609157'),
+  VINTAGE_GLITCH: VINTAGE_GLITCH_MAT,
 };
 for (const [k, v] of Object.entries(T_VE)) {
   if (!v) { console.error(`❌ video_effect 없음: ${k} — draft_content.json를 갱신하세요`); process.exit(1); }
@@ -83,7 +103,7 @@ const T_DENOISE    = (tmats.realtime_denoises || [])[0];
 
 // 템플릿에서 가져온 모든 material의 check_flag를 0으로 초기화 (AI 트래킹 비활성화)
 const clearTracking = (obj) => { if (obj && typeof obj === 'object') { if ('check_flag' in obj) obj.check_flag = 0; } return obj; };
-[T_STICKER, ...Object.values(T_VE), T_TRANSITION, T_HSL, T_DENOISE].forEach(clearTracking);
+[...Object.values(T_VE), T_TRANSITION, T_HSL, T_DENOISE].forEach(clearTracking);
 const HSL_PATH     = normPath(T_HSL?.path || '');
 const HSL_LUMI     = normPath(T_HSL?.lumi_hub_path || '');
 const DENOISE_PATH = normPath(T_DENOISE?.path || '');
@@ -96,13 +116,9 @@ const OUTPUT_PATH= path.join(OUTPUT_DIR, 'draft_content.json');
 const SCALE_MAX        = 1.15;
 const SCALE_Y          = SCALE_MAX ** 2;          // 1.3225 — 마스터 템플릿 원본값 유지
 const UNIFORM_VAL      = 1 / SCALE_MAX;           // 0.8695 — 마스터 템플릿 원본값 유지
-const STK_SCALE        = 0.18;                    // 스티커 크기 (1.0 = canvas_half_height)
-const STK_X            = -1.30;                   // 스티커 X (-1.7778=왼쪽 끝, 0=중앙)
-const STK_Y            = -0.68;                   // 스티커 Y (-1.0=아래 끝, +1.0=위 끝)
 const TRANS_DURATION   = 1_000_000;               // B 페이드 1.0s
-const NOISE_OUT_DUR    = 2_000_000;               // 노이즈 아웃 2.0s
+const VINTAGE_DUR      = 2_000_000;               // 빈티지 결함 2.0s (리드인 + 아웃트로 공통)
 const WHITE_IN_DUR     = 2_300_000;               // 화이트 인 2.3s
-const TAPE_DUR         = toUs(1.93);              // 80년대 테이프 1.93s
 const BGM_VOL          = 0.17782793939113617;
 const TTS_VOL          = 0.5011872053146362;
 const SENTENCE_END     = new Set(['。', '！', '？', '!', '?', '…']);
@@ -150,7 +166,7 @@ console.log(`  ${orderedChunks.length}개 chunk: ${orderedChunks.map(c => c.chun
 console.log('\nSTEP 2: 타임라인 블록 조립 중...');
 
 const NOISE_CLIP_US = 2_000_000;                         // radio noise 클립 재생 길이 2.0s
-const LEAD_DUR      = Math.max(TAPE_DUR, NOISE_CLIP_US); // radio+tape 완료까지 대기 (2.0s)
+const LEAD_DUR      = Math.max(VINTAGE_DUR, NOISE_CLIP_US); // radio+빈티지 결함 완료까지 대기 (2.0s)
 
 // chunk 역할 분류
 const openingChunk = orderedChunks.find(c => c.type === 'opening');
@@ -195,7 +211,7 @@ for (const ep of epNums) {
     cursor = sceneEnd;  // +2초 후 다음 블록 시작
   }
 
-  // SEGMENT C: DJ bridge (Radio+Tape → DJ TTS)
+  // SEGMENT C: DJ bridge (Radio+빈티지 결함 → DJ TTS)
   if (djChunk) {
     const sceneStart = cursor;
     const ttsStart   = cursor + LEAD_DUR;
@@ -216,9 +232,9 @@ if (closingChunk) {
   cursor = sceneEnd;
 }
 
-// Noise Out 시작 = 모든 콘텐츠 완전 종료 직후 (검은 화면 아웃트로)
+// 아웃트로 시작 = 모든 콘텐츠 완전 종료 직후 (검은 화면 + 빈티지 결함 + Radio noise)
 const noiseOutStart = cursor;
-const TOTAL_US      = noiseOutStart + NOISE_OUT_DUR;
+const TOTAL_US      = noiseOutStart + VINTAGE_DUR;
 
 // 하위 호환 앵커 / EP_MAP
 const anchors = {};
@@ -238,7 +254,7 @@ for (const block of timelineBlocks) {
   }
 }
 
-console.log(`  총 타임라인: ${(TOTAL_US/1e6).toFixed(2)}s  (Noise Out: ${(noiseOutStart/1e6).toFixed(2)}s)`);
+console.log(`  총 타임라인: ${(TOTAL_US/1e6).toFixed(2)}s  (아웃트로: ${(noiseOutStart/1e6).toFixed(2)}s)`);
 for (const b of timelineBlocks) {
   const tag = b.type === 'story' ? `EP${b.ep} story` : b.type === 'dj' ? `EP${b.ep} dj  ` : b.type + '     ';
   const sc  = b.sceneStart !== null ? `${(b.sceneStart/1e6).toFixed(2)}s` : '  -  ';
@@ -414,22 +430,14 @@ function makeAudioAuxRefs(fadeIn = 0, fadeOut = 0) {
   };
 }
 
-function makeStickerAuxRefs() {
-  const trackingId = newUUID();
-  return {
-    refs: [trackingId],
-    video_trackings: [{ id: trackingId, type: 'video_tracking', result_path: '', map_path: '', config: { width: 0, height: 0, center_x: 0, center_y: 0, rotation: 0 }, version: '', tracker_type: 0, enable_scale: true, enable_relative_distance: true, tracking_time_range: 0, trackers: [], enable_video_tracking: false }],
-  };
-}
-
 // ─── 소재 누적기 ──────────────────────────────────────────────────────────────
 const M = {
-  videos: [], audios: [], stickers: [T_STICKER],
+  videos: [], audios: [], stickers: [],  // WAVE 스티커 제거 (유료 전환)
   canvases: [], transitions: [], audio_fades: [], beats: [],
   material_animations: [], placeholder_infos: [], speeds: [], chromas: (tmats.chromas || []).slice(),
   realtime_denoises: [], video_trackings: [], hsl: [],
-  // video_effects: 중복 없이 4종만 (레트로 플리커로 교체)
-  video_effects: [T_VE.RETRO_FLICKER, T_VE.NOISE_OUT, T_VE.WHITE_IN, T_VE.TAPE_80S],
+  // video_effects: 중복 없이 3종만 (레트로 플리커 / 화이트 인 / 빈티지 결함)
+  video_effects: [T_VE.RETRO_FLICKER, T_VE.WHITE_IN, T_VE.VINTAGE_GLITCH],
   sound_channel_mappings: [], material_colors: [], vocal_separations: [],
   texts: [], tail_leaders: [], images: [], texts_templates: [],
   audio_effects: [], audio_pannings: [], audio_pitch_shifts: [],
@@ -562,47 +570,6 @@ function makeEffectSegment({ materialId, start, dur, trackRenderIndex = 11006 })
   };
 }
 
-function makeStickerSegment({ materialId, start, dur, extraRefs }) {
-  return {
-    id: newUUID(),
-    source_timerange: null,
-    target_timerange: { start, duration: dur },
-    render_timerange: { start: 0, duration: 0 },
-    desc: '', state: 0, speed: 1,
-    is_loop: false, is_tone_modify: false, reverse: false,
-    intensifies_audio: false, cartoon: false,
-    volume: 1, last_nonzero_volume: 1,
-    clip: {
-      scale: { x: STK_SCALE, y: STK_SCALE },
-      rotation: 0,
-      transform: { x: STK_X, y: STK_Y },
-      flip: { vertical: false, horizontal: false },
-      alpha: 1,
-    },
-    uniform_scale: { on: true, value: 1 },
-    material_id: materialId,
-    extra_material_refs: extraRefs,
-    render_index: 14001, keyframe_refs: [],
-    enable_lut: false, enable_adjust: false, enable_hsl: false,
-    visible: true, group_id: '',
-    enable_color_curves: true, enable_hsl_curves: true,
-    track_render_index: 2,
-    hdr_settings: null, enable_color_wheels: true,
-    track_attribute: 0, is_placeholder: false,
-    template_id: '', enable_smart_color_adjust: false,
-    template_scene: 'default',
-    common_keyframes: [], caption_info: null,
-    responsive_layout: { enable: false, target_follow: '', size_layout: 0, horizontal_pos_layout: 0, vertical_pos_layout: 0 },
-    enable_color_match_adjust: false, enable_color_correct_adjust: false,
-    enable_adjust_mask: false, raw_segment_id: '',
-    lyric_keyframes: null, enable_video_mask: true,
-    digital_human_template_group_id: '',
-    color_correct_alg_result: '', source: 'segmentsourcenormal',
-    enable_mask_stroke: false, enable_mask_shadow: false,
-    enable_color_adjust_pro: false,
-  };
-}
-
 // ─── STEP 4: 비디오 세그먼트 빌드 ────────────────────────────────────────────
 console.log('\nSTEP 4: 비디오 세그먼트 빌드 중...');
 
@@ -685,36 +652,28 @@ sceneTimeline.forEach((scene, i) => {
 M.transitions.push(...transitionMats);
 console.log(`  비디오 세그먼트: ${videoSegments.length}개 / B 페이드: ${transitionMats.length}개`);
 
-// ─── STEP 5: 이펙트 + 스티커 빌드 (SKILL 규칙 준수) ──────────────────────────
-console.log('\nSTEP 5: 이펙트 + 스티커 빌드 중...');
+// ─── STEP 5: 이펙트 빌드 (SKILL 규칙 준수) ──────────────────────────────────
+console.log('\nSTEP 5: 이펙트 빌드 중...');
 
-const effectSegs3 = [];  // Retro Flicker / Noise Out / White In
-const effectSegs4 = [];  // 80s Tape
-const stickerSegs = [];
+const effectSegs3 = [];  // Retro Flicker / White In
+const effectSegs4 = [];  // 빈티지 결함 (리드인 + 아웃트로)
 
 for (const block of timelineBlocks) {
   if (block.type === 'opening' || block.type === 'dj' || block.type === 'closing') {
-    // 1. TAPE_80S: sceneStart에서 시작, TAPE_DUR만큼 (Radio noise와 동시 재생)
+    // 1. 빈티지 결함: sceneStart에서 시작, VINTAGE_DUR만큼 (Radio noise와 동시 재생)
     effectSegs4.push(makeEffectSegment({
-      materialId: T_VE.TAPE_80S.id,
+      materialId: T_VE.VINTAGE_GLITCH.id,
       start: block.sceneStart,
-      dur: TAPE_DUR,
-      trackRenderIndex: 11005,
+      dur: VINTAGE_DUR,
+      trackRenderIndex: 11007,
     }));
 
-    // 2. 레트로 플리커 + WAVE 스티커: 정확히 DJ TTS 시작~종료 구간에만
+    // 2. 레트로 플리커: 정확히 DJ TTS 시작~종료 구간에만
     effectSegs3.push(makeEffectSegment({
       materialId: T_VE.RETRO_FLICKER.id,
       start: block.ttsStart,
       dur: block.chunk.durUs,
       trackRenderIndex: 11006,
-    }));
-    const stkAux = makeStickerAuxRefs(); addAux(stkAux);
-    stickerSegs.push(makeStickerSegment({
-      materialId: T_STICKER.id,
-      start: block.ttsStart,
-      dur: block.chunk.durUs,
-      extraRefs: stkAux.refs,
     }));
   }
 
@@ -729,15 +688,15 @@ for (const block of timelineBlocks) {
   }
 }
 
-// SEGMENT D: Noise Out — 모든 콘텐츠 종료 후 검은 화면에서 단독 재생
-effectSegs3.push(makeEffectSegment({
-  materialId: T_VE.NOISE_OUT.id,
+// 아웃트로: 모든 콘텐츠 종료 후 검은 화면에서 빈티지 결함 단독 재생 (Radio noise 동시)
+effectSegs4.push(makeEffectSegment({
+  materialId: T_VE.VINTAGE_GLITCH.id,
   start: noiseOutStart,
-  dur: NOISE_OUT_DUR,
-  trackRenderIndex: 11006,
+  dur: VINTAGE_DUR,
+  trackRenderIndex: 11007,
 }));
 
-console.log(`  이펙트: ${effectSegs3.length + effectSegs4.length}개 / 스티커: ${stickerSegs.length}개`);
+console.log(`  이펙트: ${effectSegs3.length + effectSegs4.length}개`);
 
 // ─── 페이드 material 헬퍼 ────────────────────────────────────────────────────
 function makeAudioFade(fadeInUs = 0, fadeOutUs = 0) {
@@ -778,15 +737,20 @@ function makeSoundMat(refMat, name, type = 'sound') {
 
 // ── Radio noise: 각 오프닝/DJ/closing 리드인 sceneStart 시점에 NOISE_CLIP_US(2s) ──
 // SEGMENT A: cursor=0에, SEGMENT C: story_end 직후에, SEGMENT D: ep3_dj_end 직후에 배치
+// + 아웃트로: 빈티지 결함과 동시에 noiseOutStart에 1회 추가
 const radioNoiseSegs = [];
-for (const block of timelineBlocks.filter(b => b.type === 'opening' || b.type === 'dj' || b.type === 'closing')) {
+const radioNoiseStarts = [
+  ...timelineBlocks.filter(b => b.type === 'opening' || b.type === 'dj' || b.type === 'closing').map(b => b.sceneStart),
+  noiseOutStart,
+];
+for (const start of radioNoiseStarts) {
   const mat = makeSoundMat(REF.radio_noise, 'Radio noise');
   const aux = makeAudioAuxRefs();
   addAux(aux);
   M.audios.push(mat);
   radioNoiseSegs.push(makeAudioSegment({
     materialId: mat.id,
-    start: block.sceneStart, dur: NOISE_CLIP_US,
+    start, dur: NOISE_CLIP_US,
     srcStart: 0, srcDur: NOISE_CLIP_US,
     volume: 1, extraRefs: aux.refs, trackRenderIndex: 5,
   }));
@@ -909,12 +873,11 @@ function makeTrack(type, segments, opts = {}) {
 const tracks = [
   makeTrack('video',   []),                                            // 0: 빈 비디오 (호환)
   makeTrack('video',   videoSegments),                                 // 1: 메인 이미지
-  makeTrack('sticker', stickerSegs),                                   // 2: 스티커
-  makeTrack('effect',  [...effectSegs3, ...effectSegs4]),              // 3: 레트로 이펙트
-  makeTrack('audio',   radioNoiseSegs),                                // 4: Radio noise
-  makeTrack('audio',   pcClickSegs),                                   // 5: PC click
-  makeTrack('audio',   track7Segs),                                    // 6: BGM
-  ...ttsSegs.map(seg => makeTrack('audio', [seg])),                    // 7~: TTS
+  makeTrack('effect',  [...effectSegs3, ...effectSegs4]),              // 2: 레트로 이펙트
+  makeTrack('audio',   radioNoiseSegs),                                // 3: Radio noise
+  makeTrack('audio',   pcClickSegs),                                   // 4: PC click
+  makeTrack('audio',   track7Segs),                                    // 5: BGM
+  ...ttsSegs.map(seg => makeTrack('audio', [seg])),                    // 6~: TTS
 ];
 
 // ─── 검증 ─────────────────────────────────────────────────────────────────────
@@ -1016,7 +979,6 @@ function validateTimeline(draft) {
   const errors  = [];
   const PAUSE_US = BREATHING_ROOM;  // 2초 여백 상수 (QA 수식용 별칭)
   const allEffectSegs  = draft.tracks.filter(t => t.type === 'effect').flatMap(t => t.segments);
-  const allStickerSegs = draft.tracks.filter(t => t.type === 'sticker').flatMap(t => t.segments);
 
   // effect_id 역매핑 (material_id → effect_id)
   const veMap = {};
@@ -1038,7 +1000,7 @@ function validateTimeline(draft) {
       errors.push(`QA2 [Duration] EP${block.ep} story: 이미지 총 dur ${totalImgDur}µs ≠ 예상 ${expectedSceneDur}µs (delta ${totalImgDur - expectedSceneDur}µs)`);
   }
 
-  // QA 3: WAVE 스티커 + 레트로 플리커 == 정확히 DJ TTS 구간
+  // QA 3: 레트로 플리커 == 정확히 DJ TTS 구간 / 빈티지 결함 == 리드인 sceneStart
   for (const block of timelineBlocks.filter(b => b.type === 'opening' || b.type === 'dj' || b.type === 'closing')) {
     const djStart = block.ttsStart;
     const djDur   = block.chunk.durUs;
@@ -1051,12 +1013,12 @@ function validateTimeline(draft) {
     if (!matchBN)
       errors.push(`QA3 [Sync] ${block.chunk.chunkId}: 레트로 플리커가 DJ TTS 구간(${(djStart/1e6).toFixed(2)}s, ${(djDur/1e6).toFixed(2)}s)과 불일치`);
 
-    const matchStk = allStickerSegs.find(s =>
-      s.target_timerange.start === djStart &&
-      s.target_timerange.duration === djDur
+    const matchVG = allEffectSegs.find(s =>
+      veMap[s.material_id] === VINTAGE_GLITCH_EFFECT_ID &&
+      s.target_timerange.start === block.sceneStart
     );
-    if (!matchStk)
-      errors.push(`QA3 [Sync] ${block.chunk.chunkId}: WAVE 스티커가 DJ TTS 구간(${(djStart/1e6).toFixed(2)}s)과 불일치`);
+    if (!matchVG)
+      errors.push(`QA3 [Sync] ${block.chunk.chunkId}: 빈티지 결함이 리드인 시작(${(block.sceneStart/1e6).toFixed(2)}s)에 없음`);
   }
 
   // QA 4: 이전 TTS 종료 + PAUSE_US == White In 시작 (breathing room 삽입 검증)
@@ -1076,11 +1038,15 @@ function validateTimeline(draft) {
       errors.push(`QA4 [Sync] EP${block.ep}: White In 종료(${(whiteInEnd/1e6).toFixed(3)}s) ≠ Story TTS 시작(${(block.ttsStart/1e6).toFixed(3)}s)`);
   }
 
-  // QA 5: Noise Out 시작 == 마지막 TTS 종료 + PAUSE_US (2초 암전 아웃트로 검증)
+  // QA 5: 아웃트로 시작 == 마지막 TTS 종료 + PAUSE_US, 빈티지 결함 + Radio noise 동시 배치
   const lastTtsEnd  = timelineBlocks[timelineBlocks.length - 1].ttsEnd;
   const expectedNOS = lastTtsEnd + PAUSE_US;
   if (Math.abs(noiseOutStart - expectedNOS) > 1000)
-    errors.push(`QA5 [Outro] Noise Out 시작(${(noiseOutStart/1e6).toFixed(3)}s) ≠ 마지막 TTS 종료+2s(${(expectedNOS/1e6).toFixed(3)}s)`);
+    errors.push(`QA5 [Outro] 아웃트로 시작(${(noiseOutStart/1e6).toFixed(3)}s) ≠ 마지막 TTS 종료+2s(${(expectedNOS/1e6).toFixed(3)}s)`);
+  if (!allEffectSegs.some(s => veMap[s.material_id] === VINTAGE_GLITCH_EFFECT_ID && s.target_timerange.start === noiseOutStart))
+    errors.push(`QA5 [Outro] 아웃트로 빈티지 결함 없음 (${(noiseOutStart/1e6).toFixed(3)}s)`);
+  if (!radioNoiseSegs.some(s => s.target_timerange.start === noiseOutStart))
+    errors.push(`QA5 [Outro] 아웃트로 Radio noise 없음 (${(noiseOutStart/1e6).toFixed(3)}s)`);
 
   // QA 6: 사연 BGM start <= White In start AND BGM end >= Story TTS end
   for (const block of timelineBlocks.filter(b => b.type === 'story')) {
